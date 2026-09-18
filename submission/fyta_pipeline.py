@@ -4,21 +4,28 @@ Tasks 1-5, on the four source tables in ../data/. The logic lives in the `fyta`
 package; this file is the entry point and the printed narrative, so the code
 that produces the run log is the same code you can import and read.
 
-Section index (grep the banner text):
-    1. LOAD        what was read, and in what form                  } Task 1
-    2. STRUCTURE   entities, declared grain, coverage of the window }  ingest
-    3. CHANNELS    raw value ranges                                 }  & orient
-    4. EVENTS      what the other three tables hold                 }
-    5. FIRST LOOK  figures, cadence self-check                      }
-    6. EVIDENCE    measured evidence per problem                    } Task 2
-    7. FINDINGS    what it is, how serious, what kind of problem    }  quality
-    8. CLEAN       first pass into something trustworthy            } Task 3
-    9. SOURCE      do the four sources agree?                       } Task 4
-   10. FEATURES    one table per plant                              } Task 5
+Section index (grep the banner text). The number is the TASK; the letter is
+the section within it, so `3a` is the first section of Task 3.
 
-The Task 1 / Task 2 line is strict: sections 1-5 state what is PRESENT,
-sections 6-7 state what is WRONG. (Section 9 breaks it deliberately: a source
-question is neither.)
+   1a. LOAD          what was read, and in what form       } Task 1
+   1b. STRUCTURE     entities, declared grain, coverage    }  ingest
+   1c. CHANNELS      raw value ranges                      }  & orient
+   1d. EVENTS        what the other three tables hold      }
+   1e. FIRST LOOK    figures, cadence self-check           }
+   2a. EVIDENCE      measured evidence per problem         } Task 2
+   2b. FINDINGS      what it is, how serious, what kind    }  quality
+   2c. DETECTION     what caught it, what is blind to it   }
+   3a. CLEAN         first pass, then the audit gate       } Task 3
+   4a. SOURCE        do the four sources agree?            } Task 4
+   5a. FEATURES      one time-indexed table per plant      } Task 5
+   6a. TRIANGULATION can three sources confirm an event?   } Task 6
+   8a. SIGNAL        drydown rate                          } Task 8
+   9a. LOG TEXT      structured, not classified            } Task 9
+
+Task 7 has no banner: it is a design sketch, so it lives in the notebook.
+
+The Task 1 / Task 2 line is strict: 1a-1e state what is PRESENT, 2a-2c state
+what is WRONG. (4a breaks it deliberately: a source question is neither.)
 
 ponytail: one entry point, five modules. The split is by CHANGE REASON, not by
 size -- sensor reading changes when we learn about the hardware, the cleaning
@@ -91,7 +98,7 @@ def main() -> None:
     # Ingest and orient. Shape, contract, coverage -- no judgement. Every
     # statement here is a fact about what is present, not about what is wrong.
 
-    h("1. LOAD - what was read, and in what form")
+    h("1a. LOAD - what was read, and in what form")
     for name, df in [("sensor", sensor), ("contextual", contextual),
                      ("images", images), ("mapping", mapping)]:
         print(f"  {name:11} {df.shape[0]:>6} rows x {df.shape[1]} cols")
@@ -101,7 +108,7 @@ def main() -> None:
     print(f"  of the {int((fmt == 'DD/MM/YYYY').sum())} slash-dated rows, every one is "
           f"resolvable: a first field above 12 cannot be a month")
 
-    h("2. STRUCTURE - entities, declared grain, coverage of the window")
+    h("1b. STRUCTURE - entities, declared grain, coverage of the window")
     print(f"  sensors {mapping['device_id'].nunique()}   plants {mapping['user_plant_id'].nunique()}"
           f"   -> {mapping.groupby('user_plant_id').size().to_dict()}")
     print()
@@ -109,16 +116,16 @@ def main() -> None:
     print()
     print(device_coverage(sensor, CADENCE)[COVERAGE_COLS].to_string(index=False))
 
-    h("3. CHANNELS - raw, as delivered, nothing filtered")
+    h("1c. CHANNELS - raw, as delivered, nothing filtered")
     print(sensor[CHANNELS].describe().T.round(2).to_string())
 
-    h("4. EVENTS AND IMAGES - what the other three tables hold")
+    h("1d. EVENTS AND IMAGES - what the other three tables hold")
     print(f"  log types: {contextual['log_type'].value_counts().to_dict()}")
     print(f"  distinct log texts: {contextual['text'].nunique()} of {len(contextual)} rows")
     print(f"  images: {len(images)}, captured hours "
           f"{sorted(set(images['captured_at'].dt.hour))}")
 
-    h("5. FIRST LOOK")
+    h("1e. FIRST LOOK")
     for name, fig in [("task1_fleet", plot_fleet(sensor)),
                       ("task1_by_device", plot_by_device(sensor, mapping, contextual))]:
         fig.savefig(OUT / "figures" / f"{name}.png", dpi=75)
@@ -131,13 +138,13 @@ def main() -> None:
     # Data quality. Every statement from here is a judgement about what is
     # wrong, how badly, and what kind of wrong it is.
 
-    h("6. QUALITY - EVIDENCE")
+    h("2a. QUALITY - EVIDENCE")
     gaps = device_coverage(sensor, CADENCE)
     for title, frame in evidence_tables(sensor, mapping, contextual, images).items():
         print(f"\n-- {title}")
         print(frame.to_string(index=False))
 
-    h("7. FINDINGS - what it is, how serious, and what kind of problem")
+    h("2b. FINDINGS - what it is, how serious, and what kind of problem")
 
     # Numbers below are the verified outputs of the detectors above; they are
     # written out because the classification is prose, not computation. The
@@ -153,7 +160,7 @@ def main() -> None:
     print(f"\n{len(findings_df)} findings; by class:")
     print(findings_df["class"].str.split(" - ").str[0].value_counts().to_string())
 
-    h("7b. DETECTION COVERAGE - what caught it, and what is blind to it")
+    h("2c. DETECTION COVERAGE - what caught it, and what is blind to it")
     coverage = detection_coverage_frame()
     for _, r in coverage.iterrows():
         print(f"\n{r['id']}  {r['finding']}")
@@ -163,7 +170,7 @@ def main() -> None:
     print(f"\n{len(coverage)} findings; every one defeats at least one obvious check")
 
     # ================================================================== TASK 3
-    h("8. CLEAN - first pass, then audit before anything is published")
+    h("3a. CLEAN - first pass, then audit before anything is published")
 
     windows = frozen_windows(sensor)
     cleaned, rejections = clean(sensor, windows)
@@ -211,7 +218,7 @@ def main() -> None:
   manufactured measurements that were never taken.""")
 
     # ================================================================== TASK 4
-    h("9. SOURCE - do the four sources agree?")
+    h("4a. SOURCE - do the four sources agree?")
 
     heads, head_cols, children = image_predictions(images)
     # The check for the parse above. The first version of the hierarchy took
@@ -288,7 +295,7 @@ def main() -> None:
   treat a new class as a schema event rather than a column that appears.""")
 
     # ================================================================== TASK 5
-    h("10. FEATURES - one time-indexed table per plant")
+    h("5a. FEATURES - one time-indexed table per plant")
 
     features = plant_features(cleaned, mapping)
     rows = assert_grain(features)
@@ -328,7 +335,7 @@ def main() -> None:
   readings that were never taken.""")
 
     # ================================================================== TASK 6
-    h("11. TRIANGULATION - can three sources confirm a fertilising event?")
+    h("6a. TRIANGULATION - can three sources confirm a fertilising event?")
 
     tri = triangulate(cleaned, features, contextual, heads)
     shown = tri.assign(fertilised=tri["fertilised"].dt.strftime("%m-%d %H:%M"),
@@ -356,7 +363,7 @@ def main() -> None:
   makes the false positive convincing.""")
 
     # ================================================================== TASK 8
-    h("13. SIGNAL - drydown rate (Task 8, optional)")
+    h("8a. SIGNAL - drydown rate (Task 8, optional)")
 
     rate = drydown_rate(cleaned)
     by_dev = rate.groupby("device_id", sort=True)["drydown_pct_per_day"]
@@ -388,7 +395,7 @@ def main() -> None:
   unrelated angle, which is the point of having a signal at all.""")
 
     # ================================================================== TASK 9
-    h("14. LOG TEXT - structured, not classified (Task 9, optional)")
+    h("9a. LOG TEXT - structured, not classified (Task 9, optional)")
 
     logs = log_signals(contextual)
     vocab = (logs[logs["intensity"].notna()]

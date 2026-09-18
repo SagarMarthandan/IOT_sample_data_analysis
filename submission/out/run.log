@@ -1,6 +1,6 @@
 
 ==============================================================================
-1. LOAD - what was read, and in what form
+1a. LOAD - what was read, and in what form
 ==============================================================================
   sensor       15950 rows x 9 cols
   contextual      49 rows x 5 cols
@@ -11,7 +11,7 @@
   of the 2016 slash-dated rows, every one is resolvable: a first field above 12 cannot be a month
 
 ==============================================================================
-2. STRUCTURE - entities, declared grain, coverage of the window
+1b. STRUCTURE - entities, declared grain, coverage of the window
 ==============================================================================
   sensors 8   plants 6   -> {'UP-1001': 2, 'UP-1002': 1, 'UP-1003': 2, 'UP-1004': 1, 'UP-1005': 1, 'UP-1006': 1}
 
@@ -32,7 +32,7 @@ SENS-07  2016       2016      20.99 2026-06-01 02:00:00 2026-06-22 01:45:00
 SENS-08  2031       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
 
 ==============================================================================
-3. CHANNELS - raw, as delivered, nothing filtered
+1c. CHANNELS - raw, as delivered, nothing filtered
 ==============================================================================
                      count    mean     std     min     25%     50%     75%      max
 soil_moisture_vwc  15950.0   29.36   12.55   -5.43   22.86   26.05   33.56   107.12
@@ -42,20 +42,20 @@ light_par          15950.0  102.53  123.47    0.00    0.00   11.10  226.70   589
 air_humidity_pct   15950.0   55.05   13.18   27.50   42.70   55.10   67.30   131.00
 
 ==============================================================================
-4. EVENTS AND IMAGES - what the other three tables hold
+1d. EVENTS AND IMAGES - what the other three tables hold
 ==============================================================================
   log types: {'watering': 34, 'light': 7, 'fertilising': 5, 'repotting': 3}
   distinct log texts: 14 of 49 rows
   images: 28, captured hours [9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
 
 ==============================================================================
-5. FIRST LOOK
+1e. FIRST LOOK
 ==============================================================================
   wrote figures/task1_fleet.png and task1_by_device.png
   self-check: every device is on the 15-minute grid
 
 ==============================================================================
-6. QUALITY - EVIDENCE
+2a. QUALITY - EVIDENCE
 ==============================================================================
 
 -- declared grain violated
@@ -142,7 +142,7 @@ UP-1005 SENS-07              6                 1
 UP-1006 SENS-08              5                 0
 
 ==============================================================================
-7. FINDINGS - what it is, how serious, and what kind of problem
+2b. FINDINGS - what it is, how serious, and what kind of problem
 ==============================================================================
 
 F1  SENS-07 soil_temp_c is Fahrenheit, not Celsius   [SENS-07]
@@ -222,7 +222,7 @@ artefact                             1
 semantic problem                     1
 
 ==============================================================================
-7b. DETECTION COVERAGE - what caught it, and what is blind to it
+2c. DETECTION COVERAGE - what caught it, and what is blind to it
 ==============================================================================
 
 F1  Fahrenheit temperature
@@ -280,7 +280,7 @@ F13  substrate label, no effective dating
 13 findings; every one defeats at least one obvious check
 
 ==============================================================================
-8. CLEAN - first pass, then audit before anything is published
+3a. CLEAN - first pass, then audit before anything is published
 ==============================================================================
   rows in          : 15950
   duplicates dropped: 15
@@ -334,7 +334,7 @@ dark-hour spikes kept and flagged, not deleted    True          8 still in the d
   manufactured measurements that were never taken.
 
 ==============================================================================
-9. SOURCE - do the four sources agree?
+4a. SOURCE - do the four sources agree?
 ==============================================================================
 -- 1. plant species      static label, no timestamps
      one substrate per species      True
@@ -375,7 +375,7 @@ image predictions       28 model output        yes on water - but circular
   treat a new class as a schema event rather than a column that appears.
 
 ==============================================================================
-10. FEATURES - one time-indexed table per plant
+5a. FEATURES - one time-indexed table per plant
 ==============================================================================
   grain        : (user_plant_id, ts_aligned) -- declared and asserted
   rows         : 11,903   (0 duplicate keys)
@@ -411,7 +411,7 @@ UP-1006       Pothos                  2016       1         0.994            0.2
   readings that were never taken.
 
 ==============================================================================
-11. TRIANGULATION - can three sources confirm a fertilising event?
+6a. TRIANGULATION - can three sources confirm a fertilising event?
 ==============================================================================
       log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  days_off  nutrient_def sensor_leg model_leg
 LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30         1         0.050       flat    silent
@@ -435,7 +435,7 @@ LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11 06-18 10:45         4
   makes the false positive convincing.
 
 ==============================================================================
-13. SIGNAL - drydown rate (Task 8, optional)
+8a. SIGNAL - drydown rate (Task 8, optional)
 ==============================================================================
            median    p10    p90  readings
 device_id                                
@@ -469,7 +469,7 @@ SENS-08      5.28   0.48  10.08      1968
   unrelated angle, which is the point of having a signal at all.
 
 ==============================================================================
-14. LOG TEXT - structured, not classified (Task 9, optional)
+9a. LOG TEXT - structured, not classified (Task 9, optional)
 ==============================================================================
 log_type                           text  intensity  n     ml
 watering           Bottom-watered today          3  6   <NA>
