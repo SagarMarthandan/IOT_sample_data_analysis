@@ -202,8 +202,12 @@ def main() -> None:
 
     print("""
   Deliberately NOT done, and why:
-    F4 SENS-03 EC drift   removing a channel is a modelling decision, not a
-                          data fix. Flagged in qc_flags, values kept.
+    F4 SENS-03 EC drift   detected, but NOT flagged per row. The cleaner flags
+                          only values outside the published range, so the flag
+                          marks the excursion past 1700 (from 06-17), NOT the
+                          drift regime (from 06-11): 354 of 1,056 drifting rows
+                          carry it. Dropping a channel is a modelling decision,
+                          not a data fix. Values kept.
     F7 the 48.5h outage  left as a hole. Interpolating would fabricate 193
                           readings that were never taken.
     F9 fan-out            a schema problem; fixed at the join, not in the data.
@@ -258,9 +262,12 @@ def main() -> None:
           f"   is_healthy is exactly (probability > 0.5)")
     print(f"     agree with the sensors?        yes - r = {a['r(Water deficiency, dryness)']:.2f}"
           f" vs dryness")
-    print("     ...but that is the same quantity, so it is a restatement, not")
-    print("     a confirmation. Two instruments reading one quantity is not two")
-    print("     measurements.")
+    print("     ...but that establishes less than it looks. Calling it 'circular'")
+    print("     was wrong -- two instruments measuring one latent variable IS")
+    print("     corroboration. Calling it 'convergent evidence' is unsupported too:")
+    print("     this dataset is SYNTHETIC, so if one generator emitted both series")
+    print("     from the same latent state, r says nothing about the world. Neither")
+    print("     reading is earned without model lineage from the vendor.")
     print(f"     independent heads fire?        no - Fungi and Animalia never exceed 0.06")
     print(f"                                    {int(a['heads ever above 0.10'])} of "
           f"{len(head_cols)} heads carry any signal")
@@ -274,7 +281,7 @@ def main() -> None:
          ["contextual logs", f"{len(contextual)}", "user-entered",
           "no - unrelated to the sensor (F11)"],
          ["image predictions", f"{int(a['photos'])}", "model output",
-          "yes on water - but circular"],
+          "yes on water - independence unestablished"],
          ["sensor data", f"{len(sensor):,}", "instrument", "the reference"]],
         columns=["source", "rows", "kind", "agrees with the sensors?"])
 
@@ -286,10 +293,11 @@ def main() -> None:
           f"out/task4_source_assessment.csv")
 
     print("""
-  Verdict: use the water heads as a FEATURE, never as a LABEL. It cannot
-  adjudicate the sensors, so where the two disagree neither can settle the
-  other (see F10, still open). is_healthy is withheld -- it is exactly
-  (probability > 0.5).
+  Verdict: use the water heads as a FEATURE, never as a LABEL. Their agreement
+  cannot settle a disagreement with the sensors, because independence is
+  unestablished and the data is synthetic (see F10, still open). What would
+  settle it is lineage: did the image model consume VWC, or did one generator
+  emit both? is_healthy is withheld -- it is exactly (probability > 0.5).
 
   Gate it at ingestion: pin model_version, fail on an unknown head name, and
   treat a new class as a schema event rather than a column that appears.""")
@@ -330,6 +338,14 @@ def main() -> None:
          a repot mid-window is invisible. Do not read this column as "true at
          this timestamp" -- D7 and D11 are the conversations that fix it.
 
+  SCOPE, stated because the brief says "unified": this table unifies the cleaned
+  sensor channels and the plant metadata, and deliberately does NOT join in the
+  logs or the images. There are 49 log rows and 28 photos against 11,903
+  fifteen-minute rows -- spreading a log across its neighbourhood would duplicate
+  it hundreds of times, and a photo the model evaluates once cannot be sampled at
+  15-minute resolution. Consumers should join both AS-OF with an explicit
+  tolerance. That is a modelling decision, not one this table makes silently.
+
   Also not done: the 48.5-hour outage (F7) is left as absent rows, made visible
   by `gap_minutes` on the row that follows it. Filling it would fabricate 193
   readings that were never taken.""")
@@ -341,12 +357,13 @@ def main() -> None:
     shown = tri.assign(fertilised=tri["fertilised"].dt.strftime("%m-%d %H:%M"),
                        image=tri["image"].dt.strftime("%m-%d %H:%M"))
     print(shown[["log", "plant", "fertilised", "d_ec", "noise_sd", "d_ec_sigma",
-                 "image", "days_off", "nutrient_def", "sensor_leg", "model_leg"]]
+                 "image", "hours_off", "nutrient_def", "sensor_leg", "model_leg"]]
           .round(3).to_string(index=False))
     tri.to_csv(OUT / "task6_triangulation.csv", index=False)
 
-    legs = (f"{int(tri['sensor_leg'].eq('moves').sum())} with a sensor response, "
-            f"{int(tri['model_leg'].eq('responds').sum())} with a model response")
+    legs = (f"{int(tri['sensor_leg'].eq('rises').sum())} with an EC rise, "
+            f"{int(tri['model_leg'].eq('responds').sum())} with a model response, "
+            f"{int(tri['model_leg'].eq('no image').sum())} with no photo in window")
     print(f"""
   {len(tri)} fertilising logs: {legs}.
 

@@ -147,11 +147,21 @@ def spec_violations(sensor: pd.DataFrame) -> pd.DataFrame:
             n = int(bad.sum())
             if not n:
                 continue
-            adjacent = int((bad & bad.shift(fill_value=False)).sum())
+            # Run-length encoding. The obvious shortcut --
+            # `n - (bad & bad.shift()).sum()` -- counts RUNS, not isolated
+            # readings: a 431-sample excursion reports as ONE "isolated" sample,
+            # and `in_runs` reports L-1 per run instead of L. Both columns were
+            # wrong, in a direction that made sustained faults look intermittent.
+            b = bad.to_numpy()
+            edges = np.flatnonzero(np.diff(np.r_[False, b, False].astype(int)))
+            lengths = edges[1::2] - edges[::2]
+            isolated, in_runs = int((lengths == 1).sum()), int(lengths[lengths >= 2].sum())
+            assert isolated + in_runs == n, "run encoding lost or invented samples"
             rows.append({
                 "device": device, "channel": channel, "n_bad": n,
                 "pct": round(100 * n / len(g), 1),
-                "isolated": n - adjacent, "in_runs": adjacent,
+                "runs": int(len(lengths)), "isolated": isolated, "in_runs": in_runs,
+                "longest_run": int(lengths.max()),
                 "min": round(g[channel].min(), 2), "max": round(g[channel].max(), 2),
             })
     return pd.DataFrame(rows)
@@ -342,17 +352,19 @@ FINDINGS = [
      "null the frozen window; do not treat 25.01 as a reading"),
 
     ("F4", "SENS-03 EC climbs monotonically, no logged cause", "SENS-03",
-     "136 uS/cm/day at R2=0.99; 337 of 354 out-of-range readings are in runs, i.e. "
-     "sustained; no fertilising log near onset; the four devices that WERE fertilised "
-     "show no EC response (-6..+3 against daily noise 42)",
+     "136 uS/cm/day at R2=0.99; 354 out-of-range readings in 17 runs -- 346 of them "
+     "inside a run (longest 307), only 8 isolated; no fertilising log near onset; "
+     "the four devices that WERE fertilised show no EC response "
+     "(-6..+3 against daily noise 42)",
      "high", "sensor fault - drift",
      "exclude EC for this device, or recalibrate; ask calibration whether a "
      "straight-line climb is possible"),
 
     ("F5", "SENS-04 moisture exceeds the instrument's specified 65% ceiling", "SENS-04",
-     "431 readings (21.4%) above 65%, peaking 107.12, and 420 of them are in runs -- "
-     "sustained excursions, not glitches; dry-down 6.5/day vs 0.5-1.9 fleet; "
-     "jitter 0.47 vs 0.14",
+     "431 readings (21.4%) above 65%, peaking 107.12. Every one sits in a run of two "
+     "or more -- 11 runs, longest 44, ZERO isolated -- so this is a sustained "
+     "excursion, not glitches; jitter 0.47 vs 0.14 fleet; dry-down 38.4 %VWC/day "
+     "vs 3-6 fleet (the Task 8 signal)",
      "high", "unknown - fault or different physical setup",
      "measure pot size and probe seating, or gravimetric reference; ask horticulture"),
 
@@ -382,20 +394,25 @@ FINDINGS = [
      "dedupe the mapping to one row per plant before joining"),
 
     ("F10", "Two plants have two sensors, and the pairs do not correlate", "UP-1001, UP-1003",
-     "r = -0.076 and +0.140; same-pot probes must move together",
+     "r = -0.076 and +0.103, n=2016 each. SENS-06 is frozen for 1,344 of its "
+     "samples, which attenuates the second toward zero -- so the true disagreement "
+     "is worse than the number. Same-pot probes share a reservoir and must move "
+     "together",
      "high", "unknown - real config or mapping bug",
      "ask product whether the app allows two sensors per plant; do not average"),
 
     ("F11", "Watering logs and sensor events are unrelated", "all plants",
-     "32 of 34 watering logs have no moisture rise within 6h. The sensor's rises "
-     "land on the hour (35 of 35, excluding SENS-08) while the logs are all at "
-     "human times -- so the two look independently generated",
+     "32 of 34 watering logs have no moisture rise within 6h. The sensor's own "
+     "rises land exactly on the hour -- 35 of 37 excluding SENS-08 -- while the "
+     "logs are all at human times, so the two look independently generated",
      "high", "label problem",
      "do not use logs as event ground truth; ask firmware whether the device does "
      "anything at 00:00"),
 
     ("F12", "Environment is near-identical across all eight devices", "all",
-     "temp r=0.974, light r=0.998, humidity r=0.946 -- while moisture r=0.103",
+     "mean pairwise r on aligned time: light 0.991, temp 0.974, humidity 0.937 -- "
+     "against moisture 0.201 and EC -0.005. Moisture is an order of magnitude "
+     "lower because each pot is its own reservoir",
      "medium", "artefact - shared or generated ambient series",
      "do not use 'differs from the fleet' as an anomaly test for temp/light/humidity"),
 
@@ -462,6 +479,74 @@ def detection_coverage_frame() -> pd.DataFrame:
     return pd.DataFrame(DETECTION_COVERAGE, columns=DETECTION_COLS)
 
 
+def cross_device_correlation(sensor: pd.DataFrame, channels=None) -> pd.DataFrame:
+    """Mean pairwise correlation between devices, per channel.
+
+    F12 claimed temp r=0.974, light r=0.998, humidity r=0.946 against moisture
+    r=0.103 -- and until this existed, NOTHING IN THE CODE COMPUTED THOSE. They
+    were transcribed from a one-off analysis, which is a claim supported by
+    nothing a reader can re-run.
+
+    The point of the number: for the shared ambient channels, "this device
+    differs from the fleet" is meaningless, because every device carries the
+    same series. For moisture it is meaningful -- each pot is its own reservoir.
+    That difference decides which anomaly tests are legal.
+    """
+    channels = CHANNELS if channels is None else channels
+    rows = []
+    for channel in channels:
+        wide = sensor.pivot_table(index="ts", columns="device_id", values=channel)
+        corr = wide.corr()
+        # Upper triangle only: the diagonal is 1 by construction and the matrix
+        # is symmetric, so including either would inflate the mean.
+        upper = corr.where(~np.tril(np.ones(corr.shape), k=0).astype(bool))
+        rows.append({"channel": channel, "mean_pairwise_r": upper.stack().mean()})
+    return pd.DataFrame(rows).round(3)
+
+
+def rise_timing(sensor: pd.DataFrame, threshold: float = 1.0) -> pd.DataFrame:
+    """Where on the clock a moisture rise actually lands.
+
+    F11's corroborating number -- "the rises land on the hour, 35 of 35" -- was
+    transcribed, and the denominator was wrong: it is 35 of 37 excluding SENS-08.
+    The point survives, and is the reason to compute it rather than remember it.
+
+    A physical watering event does not care what minute it is. A rise landing
+    exactly on the hour is a generator or scheduler artefact, not a plant.
+    """
+    rows = []
+    for device, g in sensor.groupby("device_id", sort=True):
+        g = g.sort_values("ts")
+        rises = g.loc[g["soil_moisture_vwc"].diff() > threshold, "ts"]
+        rows.append({"device": device, "rises": len(rises),
+                     "on_the_hour": int((rises.dt.minute == 0).sum())})
+    return pd.DataFrame(rows)
+
+
+def colocated_correlation(sensor: pd.DataFrame, mapping: pd.DataFrame,
+                          channel: str = "soil_moisture_vwc") -> pd.DataFrame:
+    """Correlation between two probes on the SAME plant.
+
+    F10's numbers (r = -0.076 and +0.140) were transcribed from a one-off
+    analysis -- nothing in the code computed them. Two probes in one pot share a
+    water reservoir, so they must move together; a near-zero r is evidence that
+    they are not in one pot, or that the mapping is wrong. Either way the
+    two-sensor question stays open (D11).
+    """
+    rows = []
+    for plant, g in mapping.groupby("user_plant_id", sort=True):
+        devices = sorted(g["device_id"])
+        if len(devices) < 2:
+            continue
+        wide = (sensor[sensor["device_id"].isin(devices)]
+                .pivot_table(index="ts", columns="device_id", values=channel))
+        for a, b in zip(devices, devices[1:]):
+            pair = wide[[a, b]].dropna()
+            rows.append({"plant": plant, "a": a, "b": b, "n": len(pair),
+                         "r": round(float(pair[a].corr(pair[b])), 3)})
+    return pd.DataFrame(rows)
+
+
 def evidence_tables(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.DataFrame,
                     images: pd.DataFrame) -> dict:
     """Every detector's output, keyed by what it shows.
@@ -482,4 +567,12 @@ def evidence_tables(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.
         # top 6 of 40 by drift ratio; the tail is ordinary day-to-day movement
         "drift vs own history (top 6 of 40)": screen_drift(sensor, CHANNELS).head(6),
         "watering logs vs sensor": log_alignment(sensor, mapping, contextual),
+        # On ALIGNED time. SENS-07's raw clock is two hours off, which drags
+        # every shared-ambient correlation down to ~0.8 and conflates this
+        # finding with a separate clock defect (F2).
+        "cross-device correlation": cross_device_correlation(align_clocks(sensor)),
+        "co-located probes, same plant": colocated_correlation(sensor, mapping),
+        "where a moisture rise lands": rise_timing(sensor),
+        "moisture jitter by device": unit_scale(sensor, "soil_moisture_vwc")[
+            ["device", "median_abs_delta", "ratio_vs_fleet"]],
     }

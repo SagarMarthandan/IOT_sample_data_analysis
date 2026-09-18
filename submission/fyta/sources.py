@@ -97,11 +97,13 @@ def assess_source(sensor: pd.DataFrame, value: str, heads: pd.DataFrame,
     })
 
 
-#: A response has to clear the sensor's own step noise to count. Three sigma is
-#: already a low bar; nothing here reaches even one.
+#: A fertiliser response must CLEAR the sensor's own step noise, and it must be
+#: a RISE. Three sigma is already a low bar; nothing here reaches even one.
 LEG_SIGMA = 3.0
 #: The image model has to actually assert something before it can corroborate.
 LEG_PROB = 0.10
+#: How close a photo must be to the event to count as evidence about it.
+IMAGE_WINDOW_H = 48.0
 
 
 def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
@@ -137,20 +139,40 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
                             "ec_us_cm_clean"].diff().std()
 
         near = heads[heads["user_plant_id"] == plant]
-        near = near.iloc[(near["captured_at"] - at).abs().argsort()[:1]] if len(near) else near
+        # Nearest photo WITHIN a tolerance, keeping the SIGN. An unbounded
+        # nearest-neighbour happily returns a photo 110 hours away and calls it
+        # evidence about this feed; `timedelta.days` also truncates toward zero,
+        # so a photo 10.75 hours BEFORE an event reported as one day away.
+        in_window = near
+        if len(near):
+            hours = (near["captured_at"] - at).dt.total_seconds() / 3600
+            in_window = near.loc[hours.abs() <= IMAGE_WINDOW_H]
+        if len(in_window):
+            offs = (in_window["captured_at"] - at).dt.total_seconds() / 3600
+            pick = offs.abs().idxmin()
+            image_at = in_window.loc[pick, "captured_at"]
+            hours_off = round(float(offs.loc[pick]), 1)
+            nutrient = float(in_window.loc[pick, "Nutrient deficiency"])
+        else:
+            image_at, hours_off, nutrient = pd.NaT, None, None
+
         rows.append({
             "log": lg["log_id"], "plant": plant, "fertilised": at,
             "d_ec": after.mean() - before.mean(), "noise_sd": noise,
-            "image": near["captured_at"].iloc[0] if len(near) else pd.NaT,
-            "days_off": abs((near["captured_at"].iloc[0] - at).days) if len(near) else None,
-            "nutrient_def": near["Nutrient deficiency"].iloc[0] if len(near) else None,
+            "image": image_at, "hours_off": hours_off, "nutrient_def": nutrient,
         })
 
     out = pd.DataFrame(rows)
     out["d_ec_sigma"] = (out["d_ec"] / out["noise_sd"]).round(2)
-    # Two legs, judged separately, so a run where one corroborates and the other
-    # does not is visible rather than collapsed into one word.
-    out["sensor_leg"] = (out["d_ec_sigma"].abs() > LEG_SIGMA).map({True: "moves", False: "flat"})
-    out["model_leg"] = (out["nutrient_def"] > LEG_PROB).map({True: "responds", False: "silent"})
-    out["corroborated"] = out["sensor_leg"].eq("moves") & out["model_leg"].eq("responds")
+    # A RISE, not a change. `.abs()` here would let a large FALL count as
+    # corroboration -- the opposite of the hypothesis under test. The label was
+    # once quietly renamed from "rises" to "moves" to match the code, which hid
+    # the error rather than fixing it.
+    out["sensor_leg"] = (out["d_ec_sigma"] > LEG_SIGMA).map({True: "rises", False: "no rise"})
+    # Three states, not two: "no image in window" is not the same finding as
+    # "the model looked and stayed silent".
+    out["model_leg"] = "silent"
+    out.loc[out["nutrient_def"].isna(), "model_leg"] = "no image"
+    out.loc[out["nutrient_def"].fillna(0) > LEG_PROB, "model_leg"] = "responds"
+    out["corroborated"] = out["sensor_leg"].eq("rises") & out["model_leg"].eq("responds")
     return out

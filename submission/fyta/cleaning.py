@@ -104,9 +104,29 @@ def audit(cleaned: pd.DataFrame, raw: pd.DataFrame, rejections: pd.DataFrame) ->
                        raw.drop_duplicates(["device_id", "ts"]).reset_index(drop=True)[c])
                        for c in CHANNELS),
                    f"all {len(CHANNELS)} raw channels match the source"))
-    checks.append(("frozen window nulled",
-                   int(cleaned["soil_moisture_vwc_clean"].isna().sum()) > 0,
-                   f"{int(cleaned['soil_moisture_vwc_clean'].isna().sum())} nulls in moisture"))
+    # Reconcile rejections against the cleaned values, BOTH ways.
+    #
+    # The first version of this check asked "is there at least one null in
+    # moisture?" -- which any unrelated null satisfies, so it could approve the
+    # exact defect it claimed to prevent: 1,344 restored frozen values still
+    # passed, carried by 61 impossible-value nulls elsewhere. Asserting the PAIR
+    # cannot be satisfied by a null somewhere else.
+    unapplied = 0
+    for channel, grp in rejections.groupby("channel"):
+        vals = cleaned.set_index(["device_id", "timestamp"])[f"{channel}_clean"]
+        unapplied += int(vals.reindex(
+            grp.set_index(["device_id", "timestamp"]).index).notna().sum())
+    checks.append(("every rejection is null in its clean column",
+                   unapplied == 0,
+                   f"{unapplied} of {len(rejections)} rejections still hold a value"))
+
+    unexplained = {c: int(cleaned[f"{c}_clean"].isna().sum())
+                   - int((rejections["channel"] == c).sum()) for c in CHANNELS}
+    orphaned = {k: v for k, v in unexplained.items() if v}
+    checks.append(("every null has a rejection behind it",
+                   not orphaned,
+                   f"unexplained: {orphaned or 'none'}"))
+
     # `ts_aligned` is the right time base here: the ceiling is a time-of-day
     # question, so a device with a clock offset must be judged on real local
     # time, not on what its clock said.
@@ -114,9 +134,12 @@ def audit(cleaned: pd.DataFrame, raw: pd.DataFrame, rejections: pd.DataFrame) ->
         cleaned.rename(columns={"ts_aligned": "ts"}), channel="light_par_clean"))
     spikes_kept = int(cleaned["qc_flags"].fillna("")
                       .str.contains("dark_hour_single_sample").sum())
-    checks.append(("dark-hour spikes kept and flagged, not deleted",
-                   spikes_left == spikes_kept == 8,
-                   f"{spikes_left} still in the data, {spikes_kept} flagged"))
+    # The detector and the flag must agree. The COUNT is data-dependent and must
+    # not be asserted -- an earlier version hardcoded `== 8`, which would break
+    # silently on a fleet that produced a ninth spike.
+    checks.append(("every dark-hour spike is flagged, and nothing else is",
+                   spikes_left == spikes_kept,
+                   f"{spikes_left} detected, {spikes_kept} flagged"))
     checks.append(("every rejection has a reason",
                    bool(rejections["reason"].notna().all() and len(rejections) > 0),
                    f"{len(rejections)} rejections recorded"))

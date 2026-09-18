@@ -18,7 +18,17 @@ rank inside that device's own recent range, which is what makes it comparable
 the whole window would judge a day-1 reading against day-21 data, which is
 leakage the moment this table feeds a model.
 
-What this table deliberately does NOT do: fill the 48.5-hour outage (F7),
+**Scope.** This table unifies the cleaned sensor channels and the plant metadata.
+It deliberately does NOT join in the logs or the images. There are 49 log rows
+and 28 photos against 11,903 fifteen-minute rows: spreading a log across every
+row in its neighbourhood would duplicate it hundreds of times and turn a sparse
+event into a claim about every slot, and a photo the model can only evaluate once
+cannot be sampled at 15-minute resolution. Production consumers should join both
+**as-of**, with an explicit tolerance, and treat "no recent log" as a distinct
+state from "no log". That is a modelling decision, and this table does not
+silently make it.
+
+What this table also deliberately does NOT do: fill the 48.5-hour outage (F7),
 resolve the two-probe question (F10), or date the substrate label (F13). Each is
 visible on the row instead of hidden -- see `gap_minutes`, `vwc_delta`, and the
 verdict in the run log.

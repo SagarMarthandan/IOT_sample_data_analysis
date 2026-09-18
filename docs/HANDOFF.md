@@ -3,7 +3,7 @@
 State of the work, written so someone with **no memory of any session** can
 continue. Updated at phase boundaries per `AGENTS.md` §18.
 
-**Last updated:** 2026-09-18 · Tasks 1–9 closed. **Only the write-up remains.**
+**Last updated:** 2026-09-18 · **Complete.** Tasks 1–9 done, write-up shipped.
 **Deadline:** Monday 21 September 2026, EOD, to gregor@fyta.de
 
 ---
@@ -28,7 +28,8 @@ FYTA Assessment/
       cleaning.py               131  Task 3: two-tier clean + audit
       sources.py                 97  Task 4: image model assessment
       features.py               127  Task 5: the per-plant table
-    fyta_pipeline.py           341  entry point + printed narrative
+    fyta_pipeline.py           480  entry point + printed narrative
+    test_gates.py               86  regression checks for the three fixes
     fyta_analysis.ipynb        38 cells — narrative + rendered output
     pyproject.toml / uv.lock / requirements.txt
     out/                       published artifacts + run.log
@@ -37,7 +38,8 @@ FYTA Assessment/
 **Verified at this boundary:**
 
 ```
-uv run fyta_pipeline.py    exit 0 · no warnings · 493 log lines
+uv run fyta_pipeline.py    exit 0 · no warnings · 545 log lines
+uv run test_gates.py       3 of 3 regression checks pass
 fyta_analysis.ipynb        51 cells · 0 errors · 2 figures · 0 function defs
 data/                      unmodified — proven by multiset comparison
 ```
@@ -73,12 +75,11 @@ fill in the 48.5-hour gap.
 
 ## 3. Not done
 
-| Task | Notes | Effort |
-|---|---|---|
-| **Write-up** | **required deliverable, does not exist.** `observations.md` is the source | ~40 min |
+Nothing. All nine tasks are done and the write-up exists.
 
-**Only the write-up remains. All nine tasks are done.** Every other graded
-surface is filled; this is the last one.
+`submission/WRITEUP.md` → `submission/WRITEUP.pdf`, **one page**, built by
+`uv run --with markdown python md_to_pdf.py` (markdown → styled HTML →
+headless Chrome print). `WRITEUP.md` is the source; edit that and rebuild.
 
 ## 4. Decisions taken, and why
 
@@ -135,6 +136,46 @@ exactly what destroys the fault signal a second probe exists to give.
 **`vwc_pct` is ranked over a TRAILING window.** A whole-window rank would judge a
 day-1 reading against day-21 data — leakage the moment the table feeds a model.
 
+## 4b. Second-opinion fixes — what was wrong and what changed
+
+An external review found three correctness defects and several stale claims.
+All were verified before being fixed, and all three fixes now have a regression
+check that fails if reverted (`submission/test_gates.py`).
+
+**The audit gate was tautological.** `cleaning.py` asked *"is there at least one
+null in moisture?"* — satisfied by any null. Restoring all 1,344 frozen SENS-06
+values still passed it, behind prose saying *"nothing publishes unless every check
+passes."* Now reconciles rejections against the cleaned values **both ways**:
+every rejection is null in its column, and every null has a rejection behind it.
+The `== 8` hardcode on the dark-hour check is gone too — the invariant is
+detector↔flag agreement, not a frozen count.
+
+**Run counting was wrong.** `spec_violations` used `n - (bad & bad.shift()).sum()`,
+which counts **runs**, not isolated readings. SENS-04's 431-sample excursion
+reported as 11 "isolated"; it is actually 11 runs, 431 in-run, **0 isolated**.
+`in_runs` was also Σ(L−1) instead of ΣL. Fixed by run-length encoding. The
+corrected numbers make F5 *stronger*: every out-of-spec reading is sustained.
+
+**Triangulation accepted a fall as corroboration.** The brief specifies a *rise*;
+the code used `.abs()`. Fixed to require `d_ec_sigma > 0`. Timing fixed too: the
+offset is now signed hours via `total_seconds()` (`abs(timedelta.days)` truncated,
+so a photo 10.75 h *before* an event read as one day away), bounded to ±48 h, and
+"no image in window" is a distinct state from "the model looked and was silent."
+
+**Numbers with no computation behind them.** F10, F12 and F11's corroborating
+figures were transcribed from one-off analyses — nothing in the code produced
+them. Three detectors added (`colocated_correlation`, `cross_device_correlation`,
+`rise_timing`); the numbers changed where the transcription was wrong:
+F12 light 0.998→0.991, humidity 0.946→0.937, moisture 0.103→0.201; F11
+"35 of 35"→**35 of 37**; F10's second pair +0.140→+0.103.
+
+**Also corrected:** F4's prose claimed the drift is "flagged in qc_flags" — it
+isn't; only 354 of 1,056 drifting rows carry the range flag, from 06-17. The
+sizing figures were **assumed**, not measured: row size 63→**67.9 B**, compression
+~5×→**7.57×** measured. The Task 5 scope is now stated rather than implied. The
+Task 4 circularity claim was reframed — "circular" was wrong, "convergent" is
+unsupported, and the synthetic generator is the reason neither is earned.
+
 ## 5. Open items — each with an owner
 
 | # | Question | Owner |
@@ -181,7 +222,7 @@ caught things reading did not. Four were mistakes I made minutes earlier.
 
 1. **Write-up** — required. Distil `observations.md`: 5 findings that matter, the
    calls I'd defend, what I'd never ship, what needs Gregor's team.
-2. **Task 8/9** — optional, not attempted, named in §12.6.
+2. **Tasks 8/9** are implemented in §13 — the optional stretches.
 
 ## 8. Unrecoverable if lost
 

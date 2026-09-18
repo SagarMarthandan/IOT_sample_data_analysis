@@ -160,7 +160,7 @@ three are reports *about* the plant.
 |---|---|
 | **Plant species** | One substrate per species ✅ — but static, so it can never be checked against a date (F13) |
 | **Contextual logs** | One `log_type` per phrase ✅ (14 phrases) — but unrelated to the sensor (F11) |
-| **Image predictions** | Internally consistent ✅ — agrees with the sensors on water at r = 0.75, **and that agreement is circular**. Independent heads never fire |
+| **Image predictions** | Internally consistent ✅ — agrees with the sensors on water at r = 0.75. **Whether that is corroboration or an artefact of the generator is unestablished** (see below). Independent heads never fire |
 | **Sensor data** | The reference. Its own defects are Tasks 1–3 |
 
 ### Why the image model's agreement is not a pass
@@ -169,9 +169,14 @@ three are reports *about* the plant.
 **−0.75** — mirror images, with both parent classes between them. That is a
 consistent taxonomy, and also a **single-factor model**.
 
-**If the model's dominant signal is the same quantity the sensor measures,
-agreement is a restatement, not a confirmation.** Two instruments reading one
-quantity is not two measurements.
+**An earlier draft called this "circular". That was wrong.** Two instruments
+measuring one latent variable *is* corroboration, not a tautology.
+
+**But the opposite reading is unsupported too.** This dataset is synthetic. If one
+generator emitted both the moisture series and the image probabilities from the
+same latent state, r = 0.75 says nothing about the world. We cannot tell "two
+modalities agree" apart from "one generator emitted both", so neither claim is
+earned. What would settle it is **model lineage from the vendor**.
 
 `Fungi` and `Animalia` never exceed 0.06 on any photo, so independence is not
 untested here — it is **untestable**. No photo has the model claiming anything

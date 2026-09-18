@@ -80,11 +80,11 @@ SENS-07       2016       2016        0        0        1.0000     0 0 days 00:15
 SENS-08       2016       2016        0       15        1.0000     0 0 days 00:15:00
 
 -- outside published range
- device           channel  n_bad  pct  isolated  in_runs    min     max
-SENS-04 soil_moisture_vwc    431 21.4        11      420  15.07  107.12
-SENS-08 soil_moisture_vwc     12  0.6        12        0  -5.43   39.59
-SENS-03          ec_us_cm    354 17.6        17      337 561.00 2266.00
-SENS-08  air_humidity_pct     10  0.5        10        0  27.50  131.00
+ device           channel  n_bad  pct  runs  isolated  in_runs  longest_run    min     max
+SENS-04 soil_moisture_vwc    431 21.4    11         0      431           44  15.07  107.12
+SENS-08 soil_moisture_vwc     12  0.6    12        12        0            1  -5.43   39.59
+SENS-03          ec_us_cm    354 17.6    17         8      346          307 561.00 2266.00
+SENS-08  air_humidity_pct     10  0.5    10        10        0            1  27.50  131.00
 
 -- dark-hour light spikes
  device                  ts   channel  value neighbours
@@ -141,6 +141,41 @@ UP-1004 SENS-05              6                 0
 UP-1005 SENS-07              6                 1
 UP-1006 SENS-08              5                 0
 
+-- cross-device correlation
+          channel  mean_pairwise_r
+soil_moisture_vwc            0.201
+      soil_temp_c            0.974
+         ec_us_cm           -0.005
+        light_par            0.991
+ air_humidity_pct            0.937
+
+-- co-located probes, same plant
+  plant       a       b    n      r
+UP-1001 SENS-01 SENS-02 2016 -0.076
+UP-1003 SENS-04 SENS-06 2016  0.103
+
+-- where a moisture rise lands
+ device  rises  on_the_hour
+SENS-01      4            4
+SENS-02      4            4
+SENS-03      6            6
+SENS-04     12           10
+SENS-05      4            4
+SENS-06      1            1
+SENS-07      6            6
+SENS-08     16           10
+
+-- moisture jitter by device
+ device  median_abs_delta  ratio_vs_fleet
+SENS-01              0.14            0.97
+SENS-02              0.15            1.03
+SENS-03              0.14            0.97
+SENS-04              0.47            3.24
+SENS-05              0.14            0.97
+SENS-06              0.00            0.00
+SENS-07              0.15            1.03
+SENS-08              0.15            1.03
+
 ==============================================================================
 2b. FINDINGS - what it is, how serious, and what kind of problem
 ==============================================================================
@@ -161,12 +196,12 @@ F3  SENS-06 moisture frozen at exactly 25.01 for 14 days   [SENS-06]
     next     : null the frozen window; do not treat 25.01 as a reading
 
 F4  SENS-03 EC climbs monotonically, no logged cause   [SENS-03]
-    detected : 136 uS/cm/day at R2=0.99; 337 of 354 out-of-range readings are in runs, i.e. sustained; no fertilising log near onset; the four devices that WERE fertilised show no EC response (-6..+3 against daily noise 42)
+    detected : 136 uS/cm/day at R2=0.99; 354 out-of-range readings in 17 runs -- 346 of them inside a run (longest 307), only 8 isolated; no fertilising log near onset; the four devices that WERE fertilised show no EC response (-6..+3 against daily noise 42)
     severity : high    class: sensor fault - drift
     next     : exclude EC for this device, or recalibrate; ask calibration whether a straight-line climb is possible
 
 F5  SENS-04 moisture exceeds the instrument's specified 65% ceiling   [SENS-04]
-    detected : 431 readings (21.4%) above 65%, peaking 107.12, and 420 of them are in runs -- sustained excursions, not glitches; dry-down 6.5/day vs 0.5-1.9 fleet; jitter 0.47 vs 0.14
+    detected : 431 readings (21.4%) above 65%, peaking 107.12. Every one sits in a run of two or more -- 11 runs, longest 44, ZERO isolated -- so this is a sustained excursion, not glitches; jitter 0.47 vs 0.14 fleet; dry-down 38.4 %VWC/day vs 3-6 fleet (the Task 8 signal)
     severity : high    class: unknown - fault or different physical setup
     next     : measure pot size and probe seating, or gravimetric reference; ask horticulture
 
@@ -191,17 +226,17 @@ F9  user_plant_id is not unique, so log/image joins multiply rows   [all]
     next     : dedupe the mapping to one row per plant before joining
 
 F10  Two plants have two sensors, and the pairs do not correlate   [UP-1001, UP-1003]
-    detected : r = -0.076 and +0.140; same-pot probes must move together
+    detected : r = -0.076 and +0.103, n=2016 each. SENS-06 is frozen for 1,344 of its samples, which attenuates the second toward zero -- so the true disagreement is worse than the number. Same-pot probes share a reservoir and must move together
     severity : high    class: unknown - real config or mapping bug
     next     : ask product whether the app allows two sensors per plant; do not average
 
 F11  Watering logs and sensor events are unrelated   [all plants]
-    detected : 32 of 34 watering logs have no moisture rise within 6h. The sensor's rises land on the hour (35 of 35, excluding SENS-08) while the logs are all at human times -- so the two look independently generated
+    detected : 32 of 34 watering logs have no moisture rise within 6h. The sensor's own rises land exactly on the hour -- 35 of 37 excluding SENS-08 -- while the logs are all at human times, so the two look independently generated
     severity : high    class: label problem
     next     : do not use logs as event ground truth; ask firmware whether the device does anything at 00:00
 
 F12  Environment is near-identical across all eight devices   [all]
-    detected : temp r=0.974, light r=0.998, humidity r=0.946 -- while moisture r=0.103
+    detected : mean pairwise r on aligned time: light 0.991, temp 0.974, humidity 0.937 -- against moisture 0.201 and EC -0.005. Moisture is an order of magnitude lower because each pot is its own reservoir
     severity : medium  class: artefact - shared or generated ambient series
     next     : do not use 'differs from the fleet' as an anomaly test for temp/light/humidity
 
@@ -301,25 +336,30 @@ impossible          71
   air_humidity_pct   raw [   27.50,   131.00]   clean [   27.50,    87.90]   nulls 10
 
 -- audit gate (nothing publishes unless every check passes)
-                                         check  passed                                  detail
-                      no duplicate keys remain    True                              15 dropped
-  soil_moisture_vwc: no impossible values left    True                                0 remain
-        soil_temp_c: no impossible values left    True                                0 remain
-           ec_us_cm: no impossible values left    True                                0 remain
-          light_par: no impossible values left    True                                0 remain
-   air_humidity_pct: no impossible values left    True                                0 remain
-                         raw columns untouched    True     all 5 raw channels match the source
-                          frozen window nulled    True                  1405 nulls in moisture
-dark-hour spikes kept and flagged, not deleted    True          8 still in the data, 8 flagged
-                  every rejection has a reason    True                1415 rejections recorded
-          detected unit outliers are all fixed    True detected ['SENS-07'], fixed ['SENS-07']
-         declared unit fixes were all detected    True fixed ['SENS-07'], detected ['SENS-07']
+                                                check  passed                                  detail
+                             no duplicate keys remain    True                              15 dropped
+         soil_moisture_vwc: no impossible values left    True                                0 remain
+               soil_temp_c: no impossible values left    True                                0 remain
+                  ec_us_cm: no impossible values left    True                                0 remain
+                 light_par: no impossible values left    True                                0 remain
+          air_humidity_pct: no impossible values left    True                                0 remain
+                                raw columns untouched    True     all 5 raw channels match the source
+          every rejection is null in its clean column    True 0 of 1415 rejections still hold a value
+                 every null has a rejection behind it    True                       unexplained: none
+every dark-hour spike is flagged, and nothing else is    True                   8 detected, 8 flagged
+                         every rejection has a reason    True                1415 rejections recorded
+                 detected unit outliers are all fixed    True detected ['SENS-07'], fixed ['SENS-07']
+                declared unit fixes were all detected    True fixed ['SENS-07'], detected ['SENS-07']
 
   published: cleaned_sensor.csv (15935 rows), qc_rejections.csv (1415 rows)
 
   Deliberately NOT done, and why:
-    F4 SENS-03 EC drift   removing a channel is a modelling decision, not a
-                          data fix. Flagged in qc_flags, values kept.
+    F4 SENS-03 EC drift   detected, but NOT flagged per row. The cleaner flags
+                          only values outside the published range, so the flag
+                          marks the excursion past 1700 (from 06-17), NOT the
+                          drift regime (from 06-11): 354 of 1,056 drifting rows
+                          carry it. Dropping a channel is a modelling decision,
+                          not a data fix. Values kept.
     F7 the 48.5h outage  left as a hole. Interpolating would fabricate 193
                           readings that were never taken.
     F9 fan-out            a schema problem; fixed at the join, not in the data.
@@ -347,9 +387,12 @@ dark-hour spikes kept and flagged, not deleted    True          8 still in the d
 -- 3. image predictions  model output
      internally consistent          True   is_healthy is exactly (probability > 0.5)
      agree with the sensors?        yes - r = 0.75 vs dryness
-     ...but that is the same quantity, so it is a restatement, not
-     a confirmation. Two instruments reading one quantity is not two
-     measurements.
+     ...but that establishes less than it looks. Calling it 'circular'
+     was wrong -- two instruments measuring one latent variable IS
+     corroboration. Calling it 'convergent evidence' is unsupported too:
+     this dataset is SYNTHETIC, so if one generator emitted both series
+     from the same latent state, r says nothing about the world. Neither
+     reading is earned without model lineage from the vendor.
      independent heads fire?        no - Fungi and Animalia never exceed 0.06
                                     4 of 7 heads carry any signal
 
@@ -357,19 +400,20 @@ dark-hour spikes kept and flagged, not deleted    True          8 still in the d
      15,950 readings; its own defects are Tasks 1-3
 
 -- the four sources side by side
-           source     rows         kind           agrees with the sensors?
-    plant species 6 plants       static  cannot be checked - no timestamps
-  contextual logs       49 user-entered no - unrelated to the sensor (F11)
-image predictions       28 model output        yes on water - but circular
-      sensor data   15,950   instrument                      the reference
+           source     rows         kind                  agrees with the sensors?
+    plant species 6 plants       static         cannot be checked - no timestamps
+  contextual logs       49 user-entered        no - unrelated to the sensor (F11)
+image predictions       28 model output yes on water - independence unestablished
+      sensor data   15,950   instrument                             the reference
 
   Raw vs cleaned: every metric is identical except the r() rows (max move 0.056).
   The answer does not depend on Task 3's choices. Full table: out/task4_source_assessment.csv
 
-  Verdict: use the water heads as a FEATURE, never as a LABEL. It cannot
-  adjudicate the sensors, so where the two disagree neither can settle the
-  other (see F10, still open). is_healthy is withheld -- it is exactly
-  (probability > 0.5).
+  Verdict: use the water heads as a FEATURE, never as a LABEL. Their agreement
+  cannot settle a disagreement with the sensors, because independence is
+  unestablished and the data is synthetic (see F10, still open). What would
+  settle it is lineage: did the image model consume VWC, or did one generator
+  emit both? is_healthy is withheld -- it is exactly (probability > 0.5).
 
   Gate it at ingestion: pin model_version, fail on an unknown head name, and
   treat a new class as a schema event rather than a column that appears.
@@ -406,6 +450,14 @@ UP-1006       Pothos                  2016       1         0.994            0.2
          a repot mid-window is invisible. Do not read this column as "true at
          this timestamp" -- D7 and D11 are the conversations that fix it.
 
+  SCOPE, stated because the brief says "unified": this table unifies the cleaned
+  sensor channels and the plant metadata, and deliberately does NOT join in the
+  logs or the images. There are 49 log rows and 28 photos against 11,903
+  fifteen-minute rows -- spreading a log across its neighbourhood would duplicate
+  it hundreds of times, and a photo the model evaluates once cannot be sampled at
+  15-minute resolution. Consumers should join both AS-OF with an explicit
+  tolerance. That is a modelling decision, not one this table makes silently.
+
   Also not done: the 48.5-hour outage (F7) is left as absent rows, made visible
   by `gap_minutes` on the row that follows it. Filling it would fabricate 193
   readings that were never taken.
@@ -413,14 +465,14 @@ UP-1006       Pothos                  2016       1         0.994            0.2
 ==============================================================================
 6a. TRIANGULATION - can three sources confirm a fertilising event?
 ==============================================================================
-      log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  days_off  nutrient_def sensor_leg model_leg
-LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30         1         0.050       flat    silent
-LOG-00009 UP-1002 06-01 20:00  3.974    58.114        0.07 06-01 09:15         1         0.051       flat    silent
-LOG-00020 UP-1003 06-12 10:00  0.604    58.493        0.01 06-14 10:00         2         0.033       flat    silent
-LOG-00024 UP-1003 06-19 10:00 -3.115    58.493       -0.05 06-20 13:00         1         0.002       flat    silent
-LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11 06-18 10:45         4         0.008       flat    silent
+      log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  hours_off  nutrient_def sensor_leg model_leg
+LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30       26.5         0.050    no rise    silent
+LOG-00009 UP-1002 06-01 20:00  3.974    58.114        0.07 06-01 09:15      -10.8         0.051    no rise    silent
+LOG-00020 UP-1003 06-12 10:00  0.604    58.493        0.01 06-14 10:00       48.0         0.033    no rise    silent
+LOG-00024 UP-1003 06-19 10:00 -3.115    58.493       -0.05 06-20 13:00       27.0         0.002    no rise    silent
+LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11         NaN        NaN           NaN    no rise  no image
 
-  5 fertilising logs: 0 with a sensor response, 0 with a model response.
+  5 fertilising logs: 0 with an EC rise, 0 with a model response, 1 with no photo in window.
 
   Triangulation does not occur -- and not because the effect is weak. Two of the
   three legs carry no fertiliser signal at all: every dEC sits inside one step of

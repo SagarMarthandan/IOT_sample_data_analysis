@@ -19,9 +19,15 @@ Everything below follows from this table, so it goes first.
 | Readings/day | 100,000 × 96 = **9,600,000** |
 | Average rate | **111 msg/s** |
 | Messages/month | **288 M** |
-| Row size (measured from this sample) | 63 B |
-| **Raw volume** | **0.60 GB/day · 220 GB/year** |
-| Parquet + zstd (~5×) | 0.12 GB/day · **44 GB/year** |
+| Row size (measured: file bytes / rows) | **67.9 B** |
+| **Raw arrival** | **0.65 GB/day · 238 GB/year** |
+| Parquet + zstd (measured **7.6×**) | **0.086 GB/day · 31 GB/year** |
+| Published table, raw + cleaned side by side | 119 B/row · 0.17 GB/day compressed |
+
+The published table is ~2× the arrival volume, because it keeps the raw column
+beside every cleaned one. That is the price of never destroying the original, and
+at this scale it is still nothing. All figures measured from the shipped sample;
+the compression ratio is a real Parquet+zstd write, not an estimate.
 
 **This is not big data.** 111 msg/s is a single process. 220 GB/year fits on a
 laptop. Any architecture that leads with Spark, a data mesh, or "web-scale
