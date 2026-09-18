@@ -1,0 +1,14 @@
+id,finding,caught_by,missed_by
+F1,Fahrenheit temperature,jitter ratio = 1.8 (the F signature),"correlation -- affine-invariant, blind to scale"
+F2,clock +2h on SENS-07,light cross-correlation vs peers,"cadence check -- grid is regular, just offset"
+F3,moisture frozen at 25.01,run-length + cross-channel,range check -- 25.01 is a legal value
+F4,SENS-03 EC drift,early-vs-late median vs own noise,correlation -- EC has no shared signal
+F5,SENS-04 above the spec ceiling,spec range + jitter + dry-down,null check -- the readings are present
+F6,single-sample glitches and one unexplained pattern,range check; light spikes found by comparing against neighbours,run-length -- they are isolated samples
+F7,SENS-05 missing 193 slots,expected-slot grid,null count -- there are zero nulls
+F8,15 duplicate rows on SENS-08,key cardinality,value checks -- the duplicates are all legal
+F9,user_plant_id fans out on join,"join cardinality, before joining","value checks -- the data is fine, the key is not"
+F10,two sensors on one plant,inter-device correlation,single-device checks -- each looks healthy alone
+F11,watering logs vs the sensor,event detection vs the log table,sensor-only or log-only -- each consistent
+F12,environment near-identical,cross-device correlation per channel,single-device checks; also range checks
+F13,"substrate label, no effective dating",manual log cross-reference,everything -- needs the app's config history

@@ -1,0 +1,425 @@
+"""FYTA Data Engineer assessment -- the runnable report.
+
+Tasks 1-5, on the four source tables in ../data/. The logic lives in the `fyta`
+package; this file is the entry point and the printed narrative, so the code
+that produces the run log is the same code you can import and read.
+
+Section index (grep the banner text):
+    1. LOAD        what was read, and in what form                  } Task 1
+    2. STRUCTURE   entities, declared grain, coverage of the window }  ingest
+    3. CHANNELS    raw value ranges                                 }  & orient
+    4. EVENTS      what the other three tables hold                 }
+    5. FIRST LOOK  figures, cadence self-check                      }
+    6. EVIDENCE    measured evidence per problem                    } Task 2
+    7. FINDINGS    what it is, how serious, what kind of problem    }  quality
+    8. CLEAN       first pass into something trustworthy            } Task 3
+    9. SOURCE      do the four sources agree?                       } Task 4
+   10. FEATURES    one table per plant                              } Task 5
+
+The Task 1 / Task 2 line is strict: sections 1-5 state what is PRESENT,
+sections 6-7 state what is WRONG. (Section 9 breaks it deliberately: a source
+question is neither.)
+
+ponytail: one entry point, five modules. The split is by CHANGE REASON, not by
+size -- sensor reading changes when we learn about the hardware, the cleaning
+policy when we decide how to treat a defect, the source assessment when a feed
+changes, the feature table when the modelling team's needs change. The findings
+table stays in sensors.py beside the detectors it cites, so a claim is never
+separated from its evidence. Merged back into one file only if a module loses
+its reader.
+
+Run:  uv run fyta_pipeline.py
+"""
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from fyta.cleaning import audit, clean
+from fyta.domain import CADENCE, CHANNELS, IMPOSSIBLE, SPEC
+from fyta.features import assert_grain, plant_features
+from fyta.sensors import (
+    COVERAGE_COLS, FINDINGS, align_clocks, check_grid, detection_coverage_frame,
+    device_coverage, evidence_tables, findings_frame, frozen_windows,
+    key_uniqueness, parse_timestamps, plot_by_device, plot_fleet,
+)
+from fyta.signals import drydown_rate, log_signals
+from fyta.sources import assess_source, image_predictions, triangulate
+
+ROOT = Path(__file__).resolve().parent
+DATA = ROOT.parent / "data"
+OUT = ROOT / "out"
+
+
+def h(title: str) -> None:
+    print(f"\n{'=' * 78}\n{title}\n{'=' * 78}")
+
+
+# Each detector below produces evidence. The classification that follows is a
+# judgement, stated separately and visibly, so the two can be checked against
+# each other rather than blended into one confident sentence.
+
+
+def main() -> None:
+    # Headless when run as a script. Deliberately NOT at module level: the
+    # notebook imports this module, and forcing Agg here would stop figures
+    # rendering inline there.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    (OUT / "figures").mkdir(parents=True, exist_ok=True)
+
+    sensor = pd.read_csv(DATA / "fyta_sensor_sample.csv")
+    sensor["ts"] = parse_timestamps(sensor["timestamp"])
+    sensor = sensor.sort_values(["device_id", "ts"], ignore_index=True)
+
+    # one date format each, so pandas' own inference is safe here
+    contextual = pd.read_csv(DATA / "fyta_contextual.csv", parse_dates=["created_at"])
+    images = pd.read_csv(DATA / "fyta_images.csv", parse_dates=["captured_at"])
+    mapping = pd.read_csv(DATA / "user_plant_device_map.csv")
+
+    declared = [
+        ("sensor", sensor, ["device_id", "ts"]),
+        ("contextual", contextual, ["log_id"]),
+        ("images", images, ["image_id"]),
+        ("mapping", mapping, ["device_id"]),
+    ]
+
+    # ================================================================== TASK 1
+    # Ingest and orient. Shape, contract, coverage -- no judgement. Every
+    # statement here is a fact about what is present, not about what is wrong.
+
+    h("1. LOAD - what was read, and in what form")
+    for name, df in [("sensor", sensor), ("contextual", contextual),
+                     ("images", images), ("mapping", mapping)]:
+        print(f"  {name:11} {df.shape[0]:>6} rows x {df.shape[1]} cols")
+    fmt = (sensor["timestamp"].astype(str).str.match(r"^\d{4}-")
+           .map({True: "ISO YYYY-MM-DD", False: "DD/MM/YYYY"}))
+    print(f"\n  sensor date formats: {fmt.value_counts().to_dict()}")
+    print(f"  of the {int((fmt == 'DD/MM/YYYY').sum())} slash-dated rows, every one is "
+          f"resolvable: a first field above 12 cannot be a month")
+
+    h("2. STRUCTURE - entities, declared grain, coverage of the window")
+    print(f"  sensors {mapping['device_id'].nunique()}   plants {mapping['user_plant_id'].nunique()}"
+          f"   -> {mapping.groupby('user_plant_id').size().to_dict()}")
+    print()
+    print(key_uniqueness(declared).to_string(index=False))
+    print()
+    print(device_coverage(sensor, CADENCE)[COVERAGE_COLS].to_string(index=False))
+
+    h("3. CHANNELS - raw, as delivered, nothing filtered")
+    print(sensor[CHANNELS].describe().T.round(2).to_string())
+
+    h("4. EVENTS AND IMAGES - what the other three tables hold")
+    print(f"  log types: {contextual['log_type'].value_counts().to_dict()}")
+    print(f"  distinct log texts: {contextual['text'].nunique()} of {len(contextual)} rows")
+    print(f"  images: {len(images)}, captured hours "
+          f"{sorted(set(images['captured_at'].dt.hour))}")
+
+    h("5. FIRST LOOK")
+    for name, fig in [("task1_fleet", plot_fleet(sensor)),
+                      ("task1_by_device", plot_by_device(sensor, mapping, contextual))]:
+        fig.savefig(OUT / "figures" / f"{name}.png", dpi=75)
+        plt.close(fig)
+    check_grid(sensor, CADENCE)
+    print("  wrote figures/task1_fleet.png and task1_by_device.png")
+    print("  self-check: every device is on the 15-minute grid")
+
+    # ================================================================== TASK 2
+    # Data quality. Every statement from here is a judgement about what is
+    # wrong, how badly, and what kind of wrong it is.
+
+    h("6. QUALITY - EVIDENCE")
+    gaps = device_coverage(sensor, CADENCE)
+    for title, frame in evidence_tables(sensor, mapping, contextual, images).items():
+        print(f"\n-- {title}")
+        print(frame.to_string(index=False))
+
+    h("7. FINDINGS - what it is, how serious, and what kind of problem")
+
+    # Numbers below are the verified outputs of the detectors above; they are
+    # written out because the classification is prose, not computation. The
+    # evidence tables sit immediately above so every claim can be checked.
+    for fid, what, device, how, severity, kind, nxt in FINDINGS:
+        print(f"\n{fid}  {what}   [{device}]")
+        print(f"    detected : {how}")
+        print(f"    severity : {severity:<7} class: {kind}")
+        print(f"    next     : {nxt}")
+
+    findings_df = findings_frame()
+    findings_df.to_csv(OUT / "task2_findings.csv", index=False)
+    print(f"\n{len(findings_df)} findings; by class:")
+    print(findings_df["class"].str.split(" - ").str[0].value_counts().to_string())
+
+    h("7b. DETECTION COVERAGE - what caught it, and what is blind to it")
+    coverage = detection_coverage_frame()
+    for _, r in coverage.iterrows():
+        print(f"\n{r['id']}  {r['finding']}")
+        print(f"    caught by : {r['caught_by']}")
+        print(f"    missed by : {r['missed_by']}")
+    coverage.to_csv(OUT / "task2_detection_coverage.csv", index=False)
+    print(f"\n{len(coverage)} findings; every one defeats at least one obvious check")
+
+    # ================================================================== TASK 3
+    h("8. CLEAN - first pass, then audit before anything is published")
+
+    windows = frozen_windows(sensor)
+    cleaned, rejections = clean(sensor, windows)
+    print(f"  rows in          : {len(sensor)}")
+    print(f"  duplicates dropped: {int(sensor.duplicated(['device_id', 'ts']).sum())}")
+    print(f"  rows out         : {len(cleaned)}")
+    print(f"  values nulled    : {len(rejections)}")
+    print(f"  values flagged   : {int((cleaned['qc_flags'] != '').sum())} "
+          f"(kept, marked outside the specified range)")
+
+    print("\n-- what was nulled, by reason")
+    print(rejections["reason"].str.split(" (", regex=False).str[0].value_counts().to_string())
+
+    print("\n-- raw vs cleaned, the channels that changed")
+    for channel in CHANNELS:
+        r, c = sensor[channel], cleaned[f"{channel}_clean"]
+        print(f"  {channel:18} raw [{r.min():8.2f}, {r.max():8.2f}]   "
+              f"clean [{c.min():8.2f}, {c.max():8.2f}]   nulls {int(c.isna().sum())}")
+
+    print("\n-- audit gate (nothing publishes unless every check passes)")
+    checks = audit(cleaned, sensor, rejections)
+    print(checks.to_string(index=False))
+    assert checks["passed"].all(), "audit failed - refusing to publish"
+
+    cleaned.to_csv(OUT / "cleaned_sensor.csv", index=False)
+    rejections.to_csv(OUT / "qc_rejections.csv", index=False)
+    print(f"\n  published: cleaned_sensor.csv ({len(cleaned)} rows), "
+          f"qc_rejections.csv ({len(rejections)} rows)")
+
+    print("""
+  Deliberately NOT done, and why:
+    F4 SENS-03 EC drift   removing a channel is a modelling decision, not a
+                          data fix. Flagged in qc_flags, values kept.
+    F7 the 48.5h outage  left as a hole. Interpolating would fabricate 193
+                          readings that were never taken.
+    F9 fan-out            a schema problem; fixed at the join, not in the data.
+    F10 two sensors       unresolved. Averaging them would invent a number
+                          describing neither pot.
+    F11 log mismatch      a label problem. The sensor values are not wrong.
+    F12 shared ambient    a constraint on what may be tested, not a defect.
+    F13 substrate label   a snapshot with no history. Needs effective dating from
+                          the app before any VWC comparison across a repot.
+
+  Not clipped to range, not averaged, not interpolated: all three would have
+  manufactured measurements that were never taken.""")
+
+    # ================================================================== TASK 4
+    h("9. SOURCE - do the four sources agree?")
+
+    heads, head_cols, children = image_predictions(images)
+    # The check for the parse above. The first version of the hierarchy took
+    # chain[-1] as the parent, and `nutrient-related issue` is a label on the
+    # taxonomy rather than a class in it -- so it named a parent with no column.
+    assert all(p in head_cols for p in children), \
+        f"hierarchy names a parent that is not a head: {set(children) - set(head_cols)}"
+    assert set(head_cols) >= set(sum(children.values(), [])), \
+        "a child is missing from the head columns"
+
+    # Controlled comparison: the SAME code on two sensor frames. Time is held
+    # constant -- the clock offset is proven (F2) and is not in dispute -- so
+    # the only thing that varies is the VALUES. One variable, so a gap between
+    # the columns can be attributed to it rather than to the pairing.
+    raw_arm = align_clocks(sensor).rename(columns={"ts": "ts_aligned"})
+    arms = pd.DataFrame({
+        "raw": assess_source(raw_arm, "soil_moisture_vwc", heads, head_cols,
+                             children, mapping, contextual),
+        "cleaned": assess_source(cleaned, "soil_moisture_vwc_clean", heads,
+                                 head_cols, children, mapping, contextual),
+    })
+    arms["delta"] = (pd.to_numeric(arms["cleaned"], errors="coerce")
+                     - pd.to_numeric(arms["raw"], errors="coerce"))
+    arms.to_csv(OUT / "task4_source_assessment.csv")
+    a = arms["cleaned"]
+
+    print("-- 1. plant species      static label, no timestamps")
+    print(f"     one substrate per species      {bool(a['species -> one substrate'])}")
+    print("     checkable against a date?      no - it never changes (F13)")
+
+    print("\n-- 2. contextual logs    user-entered")
+    print(f"     one log_type per phrase        {bool(a['log phrase -> one log_type'])}")
+    print("     do they line up with sensors?  no - the two were never connected (F11)")
+
+    print("\n-- 3. image predictions  model output")
+    print(f"     internally consistent          {bool(a['is_healthy == (prob > 0.5)'])}"
+          f"   is_healthy is exactly (probability > 0.5)")
+    print(f"     agree with the sensors?        yes - r = {a['r(Water deficiency, dryness)']:.2f}"
+          f" vs dryness")
+    print("     ...but that is the same quantity, so it is a restatement, not")
+    print("     a confirmation. Two instruments reading one quantity is not two")
+    print("     measurements.")
+    print(f"     independent heads fire?        no - Fungi and Animalia never exceed 0.06")
+    print(f"                                    {int(a['heads ever above 0.10'])} of "
+          f"{len(head_cols)} heads carry any signal")
+
+    print("\n-- 4. sensor data        the reference the other three are read against")
+    print(f"     {len(sensor):,} readings; its own defects are Tasks 1-3")
+
+    agree = pd.DataFrame(
+        [["plant species", f"{mapping['user_plant_id'].nunique()} plants", "static",
+          "cannot be checked - no timestamps"],
+         ["contextual logs", f"{len(contextual)}", "user-entered",
+          "no - unrelated to the sensor (F11)"],
+         ["image predictions", f"{int(a['photos'])}", "model output",
+          "yes on water - but circular"],
+         ["sensor data", f"{len(sensor):,}", "instrument", "the reference"]],
+        columns=["source", "rows", "kind", "agrees with the sensors?"])
+
+    print("\n-- the four sources side by side")
+    print(agree.to_string(index=False))
+    print(f"\n  Raw vs cleaned: every metric is identical except the r() rows "
+          f"(max move {arms['delta'].abs().max():.3f}).\n"
+          f"  The answer does not depend on Task 3's choices. Full table: "
+          f"out/task4_source_assessment.csv")
+
+    print("""
+  Verdict: use the water heads as a FEATURE, never as a LABEL. It cannot
+  adjudicate the sensors, so where the two disagree neither can settle the
+  other (see F10, still open). is_healthy is withheld -- it is exactly
+  (probability > 0.5).
+
+  Gate it at ingestion: pin model_version, fail on an unknown head name, and
+  treat a new class as a schema event rather than a column that appears.""")
+
+    # ================================================================== TASK 5
+    h("10. FEATURES - one time-indexed table per plant")
+
+    features = plant_features(cleaned, mapping)
+    rows = assert_grain(features)
+
+    print("  grain        : (user_plant_id, ts_aligned) -- declared and asserted")
+    print(f"  rows         : {rows:,}   (0 duplicate keys)")
+    print(f"  columns      : {len(features.columns)}")
+    print(f"  plants       : {features['user_plant_id'].nunique()}")
+    print(f"  span         : {features['ts_aligned'].min()} -> "
+          f"{features['ts_aligned'].max()}")
+
+    print("\n-- per plant")
+    per = features.groupby(["user_plant_id", "species"], sort=True).agg(
+        rows=("ts_aligned", "size"),
+        probes=("n_sensors", "first"),
+        vwc_coverage=("vwc_1", lambda s: round(float(s.notna().mean()), 3)),
+        longest_gap_h=("gap_minutes", lambda s: round(float(s.max()) / 60, 1)))
+    print(per.to_string())
+
+    features.to_csv(OUT / "plant_features.csv", index=False)
+    print("\n  published: plant_features.csv")
+
+    print("""
+  Two things this table does NOT hide:
+
+    F10  UP-1001 and UP-1003 carry two probes each. Both are kept side by side,
+         with `vwc_delta` as their disagreement. Averaging them would produce one
+         number describing neither pot -- and would throw away the fault signal
+         that a second probe exists to provide.
+
+    F13  `substrate` is what the app says today. There is no effective dating, so
+         a repot mid-window is invisible. Do not read this column as "true at
+         this timestamp" -- D7 and D11 are the conversations that fix it.
+
+  Also not done: the 48.5-hour outage (F7) is left as absent rows, made visible
+  by `gap_minutes` on the row that follows it. Filling it would fabricate 193
+  readings that were never taken.""")
+
+    # ================================================================== TASK 6
+    h("11. TRIANGULATION - can three sources confirm a fertilising event?")
+
+    tri = triangulate(cleaned, features, contextual, heads)
+    shown = tri.assign(fertilised=tri["fertilised"].dt.strftime("%m-%d %H:%M"),
+                       image=tri["image"].dt.strftime("%m-%d %H:%M"))
+    print(shown[["log", "plant", "fertilised", "d_ec", "noise_sd", "d_ec_sigma",
+                 "image", "days_off", "nutrient_def", "sensor_leg", "model_leg"]]
+          .round(3).to_string(index=False))
+    tri.to_csv(OUT / "task6_triangulation.csv", index=False)
+
+    legs = (f"{int(tri['sensor_leg'].eq('moves').sum())} with a sensor response, "
+            f"{int(tri['model_leg'].eq('responds').sum())} with a model response")
+    print(f"""
+  {len(tri)} fertilising logs: {legs}.
+
+  Triangulation does not occur -- and not because the effect is weak. Two of the
+  three legs carry no fertiliser signal at all: every dEC sits inside one step of
+  the device's own noise, and two of the five are negative. The model leg cannot
+  corroborate either, because its nutrient head never exceeds 0.073 on any photo
+  (section 9). A head that never fires can neither agree nor disagree.
+
+  THE WINDOW IS THE TRAP. Widen it and UP-1002 appears to confirm: its EC climbs
+  1,289 uS/cm across the record, so "fertilised, then EC rose" looks true. It is
+  not -- the climb starts TEN DAYS after the feed and is a straight line, which
+  is SENS-03's gain drift (F4), not chemistry. A drift on the same plant is what
+  makes the false positive convincing.""")
+
+    # ================================================================== TASK 8
+    h("13. SIGNAL - drydown rate (Task 8, optional)")
+
+    rate = drydown_rate(cleaned)
+    by_dev = rate.groupby("device_id", sort=True)["drydown_pct_per_day"]
+    per_dev = by_dev.agg(median="median", p10=lambda s: s.quantile(0.10),
+                         p90=lambda s: s.quantile(0.90))
+    per_dev["readings"] = by_dev.count()
+    print(per_dev.round(2).to_string())
+    rate.to_csv(OUT / "task8_drydown.csv", index=False)
+
+    print(f"""
+  THE RATE IS COMPARABLE WHERE THE LEVEL IS NOT. An absolute VWC threshold is
+  wrong across substrates -- that is what the conversion curve is for, and what
+  is still unresolved here (F13, D7). But "this pot loses 2 %/day" means the
+  same thing in coir as in bark, so the rate carries across the fleet without a
+  calibration nobody has confirmed.
+
+  Median, not mean: a watering event is a large jump the other way, and a mean
+  would average drying together with watering. Positive = drying.
+
+  A per-step rate also amplifies per-reading noise -- 0.4 %VWC of jitter over
+  15 minutes reads as 38 %/day -- which is exactly why the median is taken over
+  a full day rather than reported per step.
+
+  THAT CORRECTION IS WHAT MAKES THE OUTLIER MEANINGFUL. SENS-04 reads
+  {per_dev.loc['SENS-04', 'median']:.1f} %/day against 3-6 for the rest of the fleet.
+  A pot cannot lose that much water and still read 15-100. It is the sawtooth
+  from F5, whose cause is still unclassified -- gain error, or a different pot.
+  The signal rediscovers the same device the range checks flagged, from an
+  unrelated angle, which is the point of having a signal at all.""")
+
+    # ================================================================== TASK 9
+    h("14. LOG TEXT - structured, not classified (Task 9, optional)")
+
+    logs = log_signals(contextual)
+    vocab = (logs[logs["intensity"].notna()]
+             .groupby(["log_type", "text", "intensity"], sort=True)
+             .agg(n=("log_id", "size"), ml=("volume_ml", "max"))
+             .reset_index())
+    print(vocab.to_string(index=False))
+    logs.to_csv(OUT / "task9_log_signals.csv", index=False)
+
+    print("""
+  A LOOKUP, NOT A CLASSIFIER. Fourteen phrases over 49 rows, and the
+  phrase-to-log_type mapping is already one-to-one -- a model would be a more
+  expensive way to write a dict, and would need labels nobody has.
+
+  The text adds a coarse intensity and one volume. That is all it encodes: only
+  1 of the 14 phrases contains a number, and the vocabulary is closed.
+
+  Limit, shared with everything else here: F11 showed the logs do not align with
+  the sensors in time, so a cleaner log is still not a timestamped event.""")
+
+    check_grid(sensor, CADENCE)
+    print("\nself-check passed: every device on the 15-minute grid; "
+          "day-first parse proven by impossibility")
+
+    gaps.to_csv(OUT / "task2_coverage_gaps.csv", index=False)
+    print("wrote out/: run.log, cleaned_sensor.csv, qc_rejections.csv, "
+          "task2_findings.csv, task2_coverage_gaps.csv, "
+          "task2_detection_coverage.csv, task4_source_assessment.csv, "
+          "plant_features.csv, task6_triangulation.csv, task8_drydown.csv, "
+          "task9_log_signals.csv, figures/")
+
+
+if __name__ == "__main__":
+    main()

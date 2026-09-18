@@ -1,0 +1,9 @@
+user_plant_id,device_id,species
+UP-1001,SENS-01,Monstera deliciosa
+UP-1001,SENS-02,Monstera deliciosa
+UP-1002,SENS-03,Ficus lyrata
+UP-1003,SENS-04,Zamioculcas zamiifolia
+UP-1003,SENS-06,Zamioculcas zamiifolia
+UP-1004,SENS-05,Basil (indoor)
+UP-1005,SENS-07,Phalaenopsis orchid
+UP-1006,SENS-08,Pothos

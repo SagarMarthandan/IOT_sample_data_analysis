@@ -1,0 +1,493 @@
+
+==============================================================================
+1. LOAD - what was read, and in what form
+==============================================================================
+  sensor       15950 rows x 9 cols
+  contextual      49 rows x 5 cols
+  images          28 rows x 5 cols
+  mapping          8 rows x 3 cols
+
+  sensor date formats: {'ISO YYYY-MM-DD': 13934, 'DD/MM/YYYY': 2016}
+  of the 2016 slash-dated rows, every one is resolvable: a first field above 12 cannot be a month
+
+==============================================================================
+2. STRUCTURE - entities, declared grain, coverage of the window
+==============================================================================
+  sensors 8   plants 6   -> {'UP-1001': 2, 'UP-1002': 1, 'UP-1003': 2, 'UP-1004': 1, 'UP-1005': 1, 'UP-1006': 1}
+
+     table declared_grain  unique
+    sensor   device_id+ts   False
+contextual         log_id    True
+    images       image_id    True
+   mapping      device_id    True
+
+ device  rows  slots_due  span_days               first                last
+SENS-01  2016       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+SENS-02  2016       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+SENS-03  2016       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+SENS-04  2016       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+SENS-05  1823       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+SENS-06  2016       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+SENS-07  2016       2016      20.99 2026-06-01 02:00:00 2026-06-22 01:45:00
+SENS-08  2031       2016      20.99 2026-06-01 00:00:00 2026-06-21 23:45:00
+
+==============================================================================
+3. CHANNELS - raw, as delivered, nothing filtered
+==============================================================================
+                     count    mean     std     min     25%     50%     75%      max
+soil_moisture_vwc  15950.0   29.36   12.55   -5.43   22.86   26.05   33.56   107.12
+soil_temp_c        15950.0   27.16   16.46   16.10   18.85   21.77   24.10    78.01
+ec_us_cm           15950.0  749.94  220.64  556.00  675.00  703.00  735.00  2266.00
+light_par          15950.0  102.53  123.47    0.00    0.00   11.10  226.70   589.00
+air_humidity_pct   15950.0   55.05   13.18   27.50   42.70   55.10   67.30   131.00
+
+==============================================================================
+4. EVENTS AND IMAGES - what the other three tables hold
+==============================================================================
+  log types: {'watering': 34, 'light': 7, 'fertilising': 5, 'repotting': 3}
+  distinct log texts: 14 of 49 rows
+  images: 28, captured hours [9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+
+==============================================================================
+5. FIRST LOOK
+==============================================================================
+  wrote figures/task1_fleet.png and task1_by_device.png
+  self-check: every device is on the 15-minute grid
+
+==============================================================================
+6. QUALITY - EVIDENCE
+==============================================================================
+
+-- declared grain violated
+ rows_with_a_twin  superfluous  conflicting
+               30           15            0
+
+-- joins that multiply rows
+fact_table       join_on  before  after  fans_out
+contextual user_plant_id      49     67      True
+    images user_plant_id      28     35      True
+    sensor     device_id   15950  15950     False
+
+-- coverage against the grid
+ device  slots_due  delivered  missing  surplus  completeness  gaps     longest_gap
+SENS-01       2016       2016        0        0        1.0000     0 0 days 00:15:00
+SENS-02       2016       2016        0        0        1.0000     0 0 days 00:15:00
+SENS-03       2016       2016        0        0        1.0000     0 0 days 00:15:00
+SENS-04       2016       2016        0        0        1.0000     0 0 days 00:15:00
+SENS-05       2016       1823      193        0        0.9043     1 2 days 00:30:00
+SENS-06       2016       2016        0        0        1.0000     0 0 days 00:15:00
+SENS-07       2016       2016        0        0        1.0000     0 0 days 00:15:00
+SENS-08       2016       2016        0       15        1.0000     0 0 days 00:15:00
+
+-- outside published range
+ device           channel  n_bad  pct  isolated  in_runs    min     max
+SENS-04 soil_moisture_vwc    431 21.4        11      420  15.07  107.12
+SENS-08 soil_moisture_vwc     12  0.6        12        0  -5.43   39.59
+SENS-03          ec_us_cm    354 17.6        17      337 561.00 2266.00
+SENS-08  air_humidity_pct     10  0.5        10        0  27.50  131.00
+
+-- dark-hour light spikes
+ device                  ts   channel  value neighbours
+SENS-08 2026-06-06 01:00:00 light_par  429.6  0.0 / 0.0
+SENS-08 2026-06-06 02:15:00 light_par  554.2  0.0 / 0.0
+SENS-08 2026-06-07 02:30:00 light_par  589.0  0.0 / 0.0
+SENS-08 2026-06-08 01:00:00 light_par  367.1  0.0 / 0.0
+SENS-08 2026-06-11 01:00:00 light_par  232.0  0.0 / 0.0
+SENS-08 2026-06-12 01:15:00 light_par  362.2  0.0 / 0.0
+SENS-08 2026-06-21 00:15:00 light_par  564.8  0.0 / 0.0
+SENS-08 2026-06-21 01:15:00 light_par  507.2  0.0 / 0.0
+
+-- frozen channels
+ device           channel  samples  frozen_at      first                last
+SENS-06 soil_moisture_vwc     1344      25.01 2026-06-08 2026-06-21 23:45:00
+
+-- clock offsets
+ device  offset_h  corr_at_zero  corr_when_aligned
+SENS-01         0        0.9996             0.9996
+SENS-02         0        0.9996             0.9996
+SENS-03         0        0.9997             0.9997
+SENS-04         0        0.9997             0.9997
+SENS-05         0        0.9997             0.9997
+SENS-06         0        0.9997             0.9997
+SENS-07         2        0.8024             0.9997
+SENS-08         0        0.9926             0.9926
+
+-- temperature unit scale
+ device  median_abs_delta  ratio_vs_fleet
+SENS-01              0.40            1.01
+SENS-02              0.40            1.01
+SENS-03              0.40            1.01
+SENS-04              0.39            0.99
+SENS-05              0.38            0.96
+SENS-06              0.39            0.99
+SENS-07              0.72            1.82
+SENS-08              0.39            0.99
+
+-- drift vs own history (top 6 of 40)
+ device           channel  early   late  shift  shift_vs_own_noise
+SENS-03          ec_us_cm  702.1 1722.8 1020.8                10.8
+SENS-02 soil_moisture_vwc   26.4   38.3   11.9                 4.5
+SENS-06  air_humidity_pct   55.3   54.7   -0.6                 2.5
+SENS-05       soil_temp_c   21.0   21.0   -0.1                 1.9
+SENS-03         light_par  103.0  102.6   -0.4                 1.5
+SENS-03 soil_moisture_vwc   28.3   34.8    6.4                 1.4
+
+-- watering logs vs sensor
+  plant  device  watering_logs  with_sensor_rise
+UP-1001 SENS-01              6                 0
+UP-1002 SENS-03              5                 1
+UP-1003 SENS-04              6                 0
+UP-1004 SENS-05              6                 0
+UP-1005 SENS-07              6                 1
+UP-1006 SENS-08              5                 0
+
+==============================================================================
+7. FINDINGS - what it is, how serious, and what kind of problem
+==============================================================================
+
+F1  SENS-07 soil_temp_c is Fahrenheit, not Celsius   [SENS-07]
+    detected : jitter ratio 1.82 vs fleet; /1.8 gives 0.400 exactly; mean and sd also match after conversion
+    severity : high    class: data problem - unit error
+    next     : convert to Celsius; ask firmware whether the payload or the conversion is wrong
+
+F2  SENS-07 on a +2h clock, and DD/MM while the fleet is ISO   [SENS-07]
+    detected : light cross-correlation 0.802 -> 0.9997 when shifted 2h
+    severity : high    class: data problem - clock/timezone
+    next     : ask firmware; testable - a timezone offset becomes +1h in winter
+
+F3  SENS-06 moisture frozen at exactly 25.01 for 14 days   [SENS-06]
+    detected : longest constant run 1344 samples; its other four channels all keep moving
+    severity : high    class: sensor fault - dead channel
+    next     : null the frozen window; do not treat 25.01 as a reading
+
+F4  SENS-03 EC climbs monotonically, no logged cause   [SENS-03]
+    detected : 136 uS/cm/day at R2=0.99; 337 of 354 out-of-range readings are in runs, i.e. sustained; no fertilising log near onset; the four devices that WERE fertilised show no EC response (-6..+3 against daily noise 42)
+    severity : high    class: sensor fault - drift
+    next     : exclude EC for this device, or recalibrate; ask calibration whether a straight-line climb is possible
+
+F5  SENS-04 moisture exceeds the instrument's specified 65% ceiling   [SENS-04]
+    detected : 431 readings (21.4%) above 65%, peaking 107.12, and 420 of them are in runs -- sustained excursions, not glitches; dry-down 6.5/day vs 0.5-1.9 fleet; jitter 0.47 vs 0.14
+    severity : high    class: unknown - fault or different physical setup
+    next     : measure pot size and probe seating, or gravimetric reference; ask horticulture
+
+F6  SENS-08 emits single-sample values that cannot be explained   [SENS-08]
+    detected : 22 are physically impossible -- 12 moisture below 0, 10 humidity above 100 -- and are emptied. 8 more are possible but implausible: a light reading at night, bracketed by zeros. The other seven devices read exactly 0 at all 8 moments, so it was not a shared light -- but a lamp near one pot would do it
+    severity : low     class: 22 sensor artefacts; 8 unresolved
+    next     : empty the impossible 22; keep and flag the 8 -- a real light would be deleted by emptying. Ask firmware at D13
+
+F7  SENS-05 missing 193 slots (48.5h)   [SENS-05]
+    detected : coverage ledger against the expected 15-min grid
+    severity : medium  class: data problem - availability
+    next     : leave the gap; the ~320-reading buffer means it was recoverable, so this was a sync failure not lost data - confirm with firmware
+
+F8  SENS-08 has 15 superfluous duplicate rows   [SENS-08]
+    detected : identical payloads, 0 conflicting
+    severity : low     class: data problem - at-least-once redelivery
+    next     : deduplicate; lossless because nothing disagrees
+
+F9  user_plant_id is not unique, so log/image joins multiply rows   [all]
+    detected : contextual 49->67, images 28->35; the sensor join is clean, which is the trap
+    severity : medium  class: schema problem
+    next     : dedupe the mapping to one row per plant before joining
+
+F10  Two plants have two sensors, and the pairs do not correlate   [UP-1001, UP-1003]
+    detected : r = -0.076 and +0.140; same-pot probes must move together
+    severity : high    class: unknown - real config or mapping bug
+    next     : ask product whether the app allows two sensors per plant; do not average
+
+F11  Watering logs and sensor events are unrelated   [all plants]
+    detected : 32 of 34 watering logs have no moisture rise within 6h. The sensor's rises land on the hour (35 of 35, excluding SENS-08) while the logs are all at human times -- so the two look independently generated
+    severity : high    class: label problem
+    next     : do not use logs as event ground truth; ask firmware whether the device does anything at 00:00
+
+F12  Environment is near-identical across all eight devices   [all]
+    detected : temp r=0.974, light r=0.998, humidity r=0.946 -- while moisture r=0.103
+    severity : medium  class: artefact - shared or generated ambient series
+    next     : do not use 'differs from the fleet' as an anomaly test for temp/light/humidity
+
+F13  substrate_label is a snapshot with no effective dating   [UP-1006]
+    detected : one label per device for the whole window, yet UP-1006 logged 'Fresh substrate + repot' on 06-13 and the label never moves
+    severity : medium  class: semantic problem - calibration parameter without history
+    next     : ask whether that pot's substrate actually changed; if it did, pre-06-13 VWC was produced by a different conversion curve than this label implies
+
+13 findings; by class:
+class
+data problem                         4
+sensor fault                         2
+unknown                              2
+22 sensor artefacts; 8 unresolved    1
+schema problem                       1
+label problem                        1
+artefact                             1
+semantic problem                     1
+
+==============================================================================
+7b. DETECTION COVERAGE - what caught it, and what is blind to it
+==============================================================================
+
+F1  Fahrenheit temperature
+    caught by : jitter ratio = 1.8 (the F signature)
+    missed by : correlation -- affine-invariant, blind to scale
+
+F2  clock +2h on SENS-07
+    caught by : light cross-correlation vs peers
+    missed by : cadence check -- grid is regular, just offset
+
+F3  moisture frozen at 25.01
+    caught by : run-length + cross-channel
+    missed by : range check -- 25.01 is a legal value
+
+F4  SENS-03 EC drift
+    caught by : early-vs-late median vs own noise
+    missed by : correlation -- EC has no shared signal
+
+F5  SENS-04 above the spec ceiling
+    caught by : spec range + jitter + dry-down
+    missed by : null check -- the readings are present
+
+F6  single-sample glitches and one unexplained pattern
+    caught by : range check; light spikes found by comparing against neighbours
+    missed by : run-length -- they are isolated samples
+
+F7  SENS-05 missing 193 slots
+    caught by : expected-slot grid
+    missed by : null count -- there are zero nulls
+
+F8  15 duplicate rows on SENS-08
+    caught by : key cardinality
+    missed by : value checks -- the duplicates are all legal
+
+F9  user_plant_id fans out on join
+    caught by : join cardinality, before joining
+    missed by : value checks -- the data is fine, the key is not
+
+F10  two sensors on one plant
+    caught by : inter-device correlation
+    missed by : single-device checks -- each looks healthy alone
+
+F11  watering logs vs the sensor
+    caught by : event detection vs the log table
+    missed by : sensor-only or log-only -- each consistent
+
+F12  environment near-identical
+    caught by : cross-device correlation per channel
+    missed by : single-device checks; also range checks
+
+F13  substrate label, no effective dating
+    caught by : manual log cross-reference
+    missed by : everything -- needs the app's config history
+
+13 findings; every one defeats at least one obvious check
+
+==============================================================================
+8. CLEAN - first pass, then audit before anything is published
+==============================================================================
+  rows in          : 15950
+  duplicates dropped: 15
+  rows out         : 15935
+  values nulled    : 1415
+  values flagged   : 744 (kept, marked outside the specified range)
+
+-- what was nulled, by reason
+reason
+frozen_channel    1344
+impossible          71
+
+-- raw vs cleaned, the channels that changed
+  soil_moisture_vwc  raw [   -5.43,   107.12]   clean [    9.36,    99.95]   nulls 1405
+  soil_temp_c        raw [   16.10,    78.01]   clean [   16.10,    25.97]   nulls 0
+  ec_us_cm           raw [  556.00,  2266.00]   clean [  556.00,  2266.00]   nulls 0
+  light_par          raw [    0.00,   589.00]   clean [    0.00,   589.00]   nulls 0
+  air_humidity_pct   raw [   27.50,   131.00]   clean [   27.50,    87.90]   nulls 10
+
+-- audit gate (nothing publishes unless every check passes)
+                                         check  passed                                  detail
+                      no duplicate keys remain    True                              15 dropped
+  soil_moisture_vwc: no impossible values left    True                                0 remain
+        soil_temp_c: no impossible values left    True                                0 remain
+           ec_us_cm: no impossible values left    True                                0 remain
+          light_par: no impossible values left    True                                0 remain
+   air_humidity_pct: no impossible values left    True                                0 remain
+                         raw columns untouched    True     all 5 raw channels match the source
+                          frozen window nulled    True                  1405 nulls in moisture
+dark-hour spikes kept and flagged, not deleted    True          8 still in the data, 8 flagged
+                  every rejection has a reason    True                1415 rejections recorded
+          detected unit outliers are all fixed    True detected ['SENS-07'], fixed ['SENS-07']
+         declared unit fixes were all detected    True fixed ['SENS-07'], detected ['SENS-07']
+
+  published: cleaned_sensor.csv (15935 rows), qc_rejections.csv (1415 rows)
+
+  Deliberately NOT done, and why:
+    F4 SENS-03 EC drift   removing a channel is a modelling decision, not a
+                          data fix. Flagged in qc_flags, values kept.
+    F7 the 48.5h outage  left as a hole. Interpolating would fabricate 193
+                          readings that were never taken.
+    F9 fan-out            a schema problem; fixed at the join, not in the data.
+    F10 two sensors       unresolved. Averaging them would invent a number
+                          describing neither pot.
+    F11 log mismatch      a label problem. The sensor values are not wrong.
+    F12 shared ambient    a constraint on what may be tested, not a defect.
+    F13 substrate label   a snapshot with no history. Needs effective dating from
+                          the app before any VWC comparison across a repot.
+
+  Not clipped to range, not averaged, not interpolated: all three would have
+  manufactured measurements that were never taken.
+
+==============================================================================
+9. SOURCE - do the four sources agree?
+==============================================================================
+-- 1. plant species      static label, no timestamps
+     one substrate per species      True
+     checkable against a date?      no - it never changes (F13)
+
+-- 2. contextual logs    user-entered
+     one log_type per phrase        True
+     do they line up with sensors?  no - the two were never connected (F11)
+
+-- 3. image predictions  model output
+     internally consistent          True   is_healthy is exactly (probability > 0.5)
+     agree with the sensors?        yes - r = 0.75 vs dryness
+     ...but that is the same quantity, so it is a restatement, not
+     a confirmation. Two instruments reading one quantity is not two
+     measurements.
+     independent heads fire?        no - Fungi and Animalia never exceed 0.06
+                                    4 of 7 heads carry any signal
+
+-- 4. sensor data        the reference the other three are read against
+     15,950 readings; its own defects are Tasks 1-3
+
+-- the four sources side by side
+           source     rows         kind           agrees with the sensors?
+    plant species 6 plants       static  cannot be checked - no timestamps
+  contextual logs       49 user-entered no - unrelated to the sensor (F11)
+image predictions       28 model output        yes on water - but circular
+      sensor data   15,950   instrument                      the reference
+
+  Raw vs cleaned: every metric is identical except the r() rows (max move 0.056).
+  The answer does not depend on Task 3's choices. Full table: out/task4_source_assessment.csv
+
+  Verdict: use the water heads as a FEATURE, never as a LABEL. It cannot
+  adjudicate the sensors, so where the two disagree neither can settle the
+  other (see F10, still open). is_healthy is withheld -- it is exactly
+  (probability > 0.5).
+
+  Gate it at ingestion: pin model_version, fail on an unknown head name, and
+  treat a new class as a schema event rather than a column that appears.
+
+==============================================================================
+10. FEATURES - one time-indexed table per plant
+==============================================================================
+  grain        : (user_plant_id, ts_aligned) -- declared and asserted
+  rows         : 11,903   (0 duplicate keys)
+  columns      : 23
+  plants       : 6
+  span         : 2026-06-01 00:00:00 -> 2026-06-21 23:45:00
+
+-- per plant
+                                      rows  probes  vwc_coverage  longest_gap_h
+user_plant_id species                                                          
+UP-1001       Monstera deliciosa      2016       2         1.000            0.2
+UP-1002       Ficus lyrata            2016       1         1.000            0.2
+UP-1003       Zamioculcas zamiifolia  2016       2         0.976            0.2
+UP-1004       Basil (indoor)          1823       1         1.000           48.5
+UP-1005       Phalaenopsis orchid     2016       1         1.000            0.2
+UP-1006       Pothos                  2016       1         0.994            0.2
+
+  published: plant_features.csv
+
+  Two things this table does NOT hide:
+
+    F10  UP-1001 and UP-1003 carry two probes each. Both are kept side by side,
+         with `vwc_delta` as their disagreement. Averaging them would produce one
+         number describing neither pot -- and would throw away the fault signal
+         that a second probe exists to provide.
+
+    F13  `substrate` is what the app says today. There is no effective dating, so
+         a repot mid-window is invisible. Do not read this column as "true at
+         this timestamp" -- D7 and D11 are the conversations that fix it.
+
+  Also not done: the 48.5-hour outage (F7) is left as absent rows, made visible
+  by `gap_minutes` on the row that follows it. Filling it would fabricate 193
+  readings that were never taken.
+
+==============================================================================
+11. TRIANGULATION - can three sources confirm a fertilising event?
+==============================================================================
+      log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  days_off  nutrient_def sensor_leg model_leg
+LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30         1         0.050       flat    silent
+LOG-00009 UP-1002 06-01 20:00  3.974    58.114        0.07 06-01 09:15         1         0.051       flat    silent
+LOG-00020 UP-1003 06-12 10:00  0.604    58.493        0.01 06-14 10:00         2         0.033       flat    silent
+LOG-00024 UP-1003 06-19 10:00 -3.115    58.493       -0.05 06-20 13:00         1         0.002       flat    silent
+LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11 06-18 10:45         4         0.008       flat    silent
+
+  5 fertilising logs: 0 with a sensor response, 0 with a model response.
+
+  Triangulation does not occur -- and not because the effect is weak. Two of the
+  three legs carry no fertiliser signal at all: every dEC sits inside one step of
+  the device's own noise, and two of the five are negative. The model leg cannot
+  corroborate either, because its nutrient head never exceeds 0.073 on any photo
+  (section 9). A head that never fires can neither agree nor disagree.
+
+  THE WINDOW IS THE TRAP. Widen it and UP-1002 appears to confirm: its EC climbs
+  1,289 uS/cm across the record, so "fertilised, then EC rose" looks true. It is
+  not -- the climb starts TEN DAYS after the feed and is a straight line, which
+  is SENS-03's gain drift (F4), not chemistry. A drift on the same plant is what
+  makes the false positive convincing.
+
+==============================================================================
+13. SIGNAL - drydown rate (Task 8, optional)
+==============================================================================
+           median    p10    p90  readings
+device_id                                
+SENS-01      3.84  -0.00   9.60      1968
+SENS-02      2.88  -1.44   6.24      1968
+SENS-03      3.36  -0.96  10.56      1968
+SENS-04     38.40  17.76  65.28      1964
+SENS-05      4.32   0.00   8.64      1775
+SENS-06      4.80   0.96  10.08       672
+SENS-07      5.76   1.44  10.08      1968
+SENS-08      5.28   0.48  10.08      1968
+
+  THE RATE IS COMPARABLE WHERE THE LEVEL IS NOT. An absolute VWC threshold is
+  wrong across substrates -- that is what the conversion curve is for, and what
+  is still unresolved here (F13, D7). But "this pot loses 2 %/day" means the
+  same thing in coir as in bark, so the rate carries across the fleet without a
+  calibration nobody has confirmed.
+
+  Median, not mean: a watering event is a large jump the other way, and a mean
+  would average drying together with watering. Positive = drying.
+
+  A per-step rate also amplifies per-reading noise -- 0.4 %VWC of jitter over
+  15 minutes reads as 38 %/day -- which is exactly why the median is taken over
+  a full day rather than reported per step.
+
+  THAT CORRECTION IS WHAT MAKES THE OUTLIER MEANINGFUL. SENS-04 reads
+  38.4 %/day against 3-6 for the rest of the fleet.
+  A pot cannot lose that much water and still read 15-100. It is the sawtooth
+  from F5, whose cause is still unclassified -- gain error, or a different pot.
+  The signal rediscovers the same device the range checks flagged, from an
+  unrelated angle, which is the point of having a signal at all.
+
+==============================================================================
+14. LOG TEXT - structured, not classified (Task 9, optional)
+==============================================================================
+log_type                           text  intensity  n     ml
+watering           Bottom-watered today          3  6   <NA>
+watering            Gave it a good soak          3 10   <NA>
+watering                    Quick water          1  3   <NA>
+watering      Top soil was dry, watered          2  5   <NA>
+watering Watered a bit, leaves drooping          1  5   <NA>
+watering                 Watered ~200ml          2  5  200.0
+
+  A LOOKUP, NOT A CLASSIFIER. Fourteen phrases over 49 rows, and the
+  phrase-to-log_type mapping is already one-to-one -- a model would be a more
+  expensive way to write a dict, and would need labels nobody has.
+
+  The text adds a coarse intensity and one volume. That is all it encodes: only
+  1 of the 14 phrases contains a number, and the vocabulary is closed.
+
+  Limit, shared with everything else here: F11 showed the logs do not align with
+  the sensors in time, so a cleaner log is still not a timestamped event.
+
+self-check passed: every device on the 15-minute grid; day-first parse proven by impossibility
+wrote out/: run.log, cleaned_sensor.csv, qc_rejections.csv, task2_findings.csv, task2_coverage_gaps.csv, task2_detection_coverage.csv, task4_source_assessment.csv, plant_features.csv, task6_triangulation.csv, task8_drydown.csv, task9_log_signals.csv, figures/

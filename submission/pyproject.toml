@@ -1,0 +1,22 @@
+[project]
+name = "fyta-assessment"
+version = "0.1.0"
+description = "FYTA Data Engineer assessment - ingest, data quality, cleaning"
+requires-python = ">=3.12,<3.13"
+
+# Ranges are deliberately conservative and stay within a major version, so the
+# resolved environment is stable and installable anywhere. Exact pins live in
+# uv.lock; `uv sync` reproduces them bit-for-bit.
+dependencies = [
+    "pandas>=2.2,<3",
+    "numpy>=1.26,<2.5",
+    "matplotlib>=3.8,<4",
+]
+
+[tool.uv]
+package = false
+
+# Only needed to build and execute the notebook. The script itself does not
+# import any of this.
+[dependency-groups]
+dev = ["nbformat>=5.10,<6", "nbclient>=0.10,<1", "ipykernel>=6.29,<7"]
