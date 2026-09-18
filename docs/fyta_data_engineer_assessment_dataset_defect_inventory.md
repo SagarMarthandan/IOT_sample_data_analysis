@@ -21,7 +21,7 @@ Vault: `~/Projects/FYTA Assessment`. 15,950 sensor rows, 8 devices, 6 plants, 21
 
 ## Confirmed defects (evidence-backed)
 | # | Defect | Evidence |
-|---|---|---|
+|:---|:---|:---|
 | 1 | SENS-07 TZ offset | rows run 02:00 -> 01:45 (+2h), DD/MM format |
 | 2 | SENS-07 unit error | soil_temp_c is Fahrenheit: 61.9-78.0 -> 16.6-25.6 C, matches fleet 16.1-26.0 |
 | 3 | SENS-06 stuck channel | moisture frozen at exactly 25.01 from 06-08 00:00, 1344/2016 rows; temp/EC/PAR/humidity all still vary |

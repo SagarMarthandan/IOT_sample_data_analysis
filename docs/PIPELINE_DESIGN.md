@@ -14,7 +14,7 @@ AWS published list, us-east-1, read 2026-09-18 — re-check before quoting.
 Everything below follows from this table, so it goes first.
 
 | | |
-|---|---|
+|:---|:---|
 | Devices | 100,000 |
 | Readings/day | 100,000 × 96 = **9,600,000** |
 | Average rate | **111 msg/s** |
@@ -102,7 +102,7 @@ and that is a build-vs-buy question, not an architecture question.
 ## 4. Variant A — self-hosted / OSS
 
 | Concern | Choice | Why this and not the obvious one |
-|---|---|---|
+|:---|:---|:---|
 | Ingest buffer | **Redpanda** | Kafka API in one binary. No ZooKeeper, no JVM tuning. Kafka's own ops are the cost here, not its throughput |
 | Stream checks | **a Python consumer** | Per-*message* checks only — reject at ingest. A loop, not complex event processing; Flink or Spark Streaming would be a second system to operate for 111 msg/s. The per-*window* checks are SQL and belong in dbt (§12) |
 | Lake | **MinIO + Parquet** | S3 API, so the code is portable to AWS later. This is the whole point of MinIO |
@@ -120,7 +120,7 @@ Rough infrastructure: **one to four nodes**, ~€150–400/month. Plus an engine
 ## 5. Variant B — AWS managed
 
 | Concern | Choice | Why |
-|---|---|---|
+|:---|:---|:---|
 | Ingest | **IoT Core** → rules → S3 | Device registry, per-device auth and revocation out of the box. Certificates are the hard part of a fleet; don't build them |
 | Messaging cost | **Basic Ingest** (reserved topic `$aws/rules/…`) | **Messaging is free on this path** — you pay rules + actions only. This is the single biggest lever in the design |
 | Buffer (optional) | **Kinesis Data Streams** | Only if you need sub-minute alerting. See below |
@@ -169,7 +169,7 @@ between Variant A and Variant B is not technical capacity, it is **total cost of
 ownership**:
 
 | | Variant A | Variant B |
-|---|---|---|
+|:---|:---|:---|
 | Infrastructure | €150–400/mo | ~$200–500/mo |
 | **Operational load** | Kafka + Airflow + MinIO + Grafana to patch, upgrade and be paged for — **~0.3–0.5 FTE** | ~0.05 FTE |
 | Lock-in | none | IoT Core rules, Kinesis, QuickSight are sticky |
@@ -205,7 +205,7 @@ it — the firmware rejecting an impossible reading costs nothing; the same read
 caught after it has been written, replicated and indexed costs a pipeline.
 
 | # | Layer | Catches | Failure mode if missing |
-|---|---|---|---|
+|:---|:---|:---|:---|
 | 1 | **Firmware** | physically impossible readings, before transmission | you pay to transport garbage |
 | 2 | **Ingest** | malformed payloads, unknown device, **unknown substrate**, impossible ranges | a schema change becomes silent NULLs |
 | 3 | **Stream / per-reading** | out-of-range, impossible, duplicate keys | at-least-once delivery becomes duplicates |
@@ -218,7 +218,7 @@ belongs. Every one of the 13 findings is a per-device-window question that a
 per-row check cannot see:
 
 | Finding | Blind to it |
-|---|---|
+|:---|:---|
 | F3 frozen channel | every value is *in range* and the value is *constant* |
 | F7 the 48.5 h hole | the file has zero nulls — only the expected-slot grid shows it |
 | F2 clock offset | a correctly-formatted timestamp that is simply two hours wrong |
@@ -245,7 +245,7 @@ The four standard pillars, plus two that matter disproportionately for a fleet.
 All per device — a fleet average hides exactly the failures you are looking for.
 
 | Pillar | Check | Alert on |
-|---|---|---|
+|:---|:---|:---|
 | **Freshness** | age of the newest reading per device | a device silent past its cadence, with hysteresis |
 | **Volume** | readings per device per day | *below* expected, not just zero |
 | **Schema** | unknown field, substrate or sensor family | immediately — this is a contract break |
@@ -281,7 +281,7 @@ this submission as `task2_detection_coverage.csv`. Each finding carries the chec
 that caught it *and* the obvious check that is structurally blind to it:
 
 | Finding | Caught by | Blind because |
-|---|---|---|
+|:---|:---|:---|
 | F2 clock offset | cross-device daylight correlation | every timestamp is well-formed |
 | F3 frozen channel | run-length + cross-channel | every value is in range |
 | F7 the hole | expected-slot grid | there are no nulls to find |
@@ -333,7 +333,7 @@ The pipeline must therefore treat derived values as **versioned artefacts**:
 The design forks on these, and none can be answered from the data.
 
 | # | Question | Why it changes the design |
-|---|---|---|
+|:---|:---|:---|
 | 1 | **Is there a hub/gateway, or does the phone relay?** | Sets the burst size, the lateness bound, and whether IoT Core connectivity is even billable |
 | 2 | **What latency does a dashboard need — minutes or hours?** | Decides whether a stream tier exists at all (§5) |
 | 3 | **Do professional sites contract for residency or on-prem?** | A contract requirement makes Variant A mandatory regardless of cost |
@@ -348,7 +348,7 @@ simple: **map each operation in the cleaning code to the thing that expresses
 it.**
 
 | Operation | Expressed as |
-|---|---|
+|:---|:---|
 | parse two date formats | `try_strptime` + `CASE` |
 | clock offset by device | join to a device lookup |
 | unit conversion | arithmetic |
@@ -366,7 +366,7 @@ it belongs there in *both* variants, because only the adapter changes.
 **What it adds over the Python:**
 
 | In this submission | As a dbt construct |
-|---|---|
+|:---|:---|
 | `assert_grain()` | `unique: [device_id, ts]` — a test, not a function |
 | `SPEC` / `IMPOSSIBLE` ranges | `accepted_values`, or a custom range test |
 | the audit gate's 12 checks | a test group that must pass before publish |

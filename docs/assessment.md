@@ -14,7 +14,7 @@
 ## At a glance
 
 | | |
-| --- | --- |
+| :--- | :--- |
 | **Role** | Data Engineer |
 | **Company** | FYTA |
 | **Contact** | Gregor Herdmann, CTO — gregor@fyta.de |
@@ -56,7 +56,7 @@ FYTA runs tens of thousands of soil/environment sensors in real homes, gardens a
 #### fyta_sensor_sample.csv
 
 | **Column** | **Meaning** |
-| --- | --- |
+| :--- | :--- |
 | device_id | Sensor identifier |
 | timestamp | Local reading time |
 | substrate_label | Substrate the *user* selected in the app (e.g. potting_soil, coco_coir, orchid_bark) |
@@ -69,7 +69,7 @@ FYTA runs tens of thousands of soil/environment sensors in real homes, gardens a
 #### fyta_contextual.csv
 
 | **Column** | **Meaning** |
-| --- | --- |
+| :--- | :--- |
 | log_id | User event log identifier |
 | user_plant_id | user plant identifier |
 | log_type | unique logs |
@@ -79,7 +79,7 @@ FYTA runs tens of thousands of soil/environment sensors in real homes, gardens a
 #### fyta_images.csv
 
 | **Column** | **Meaning** |
-| --- | --- |
+| :--- | :--- |
 | image_id | User plant image identifier |
 | user_plant_id | user plant identifier |
 | captured_at | datetime |

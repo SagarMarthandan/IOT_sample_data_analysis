@@ -87,7 +87,7 @@ that is not listed.
 ## Check before you save
 
 | | |
-|---|---|
+|:---|:---|
 | **Boxes** | 12 — the 10 in the row, plus Quarantine and Kinesis |
 | **Row order** | BLE Soil Sensor · Phone App / Hub · AWS IoT Core · Basic Ingest · Amazon S3 · dbt · RDS Postgres · Managed Grafana · QuickSight · SageMaker |
 | **Bands** | DEVICE · INGEST · RAW · TRANSFORM · SERVE · MODEL |
@@ -98,7 +98,7 @@ that is not listed.
 They should look like a pair, differing only in what the boxes are made of:
 
 | OSS (`Open_Source.jpeg`) | AWS (this one) |
-|---|---|
+|:---|:---|
 | Redpanda | **AWS IoT Core + Basic Ingest** |
 | MinIO | **Amazon S3** |
 | Postgres / Grafana / Metabase | **RDS Postgres / Managed Grafana / QuickSight** |

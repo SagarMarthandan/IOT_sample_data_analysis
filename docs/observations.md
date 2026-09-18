@@ -10,7 +10,7 @@ them.
 **Where each thing lives:**
 
 | File | Holds |
-|---|---|
+|:---|:---|
 | `DATA.md` | what the data actually **is** |
 | `decision_register.md` | choices waiting on a **conversation** (D1–D12) |
 | **this file** | findings · method · mistakes · open items |
@@ -25,7 +25,7 @@ Machine-readable versions: `submission/out/task2_findings.csv`,
 13 findings. Full detail is in `task2_findings.csv`.
 
 | # | Finding | Device | Severity | Class |
-|---|---|---|---|---|
+|:---|:---|:---|:---|:---|
 | **F1** | `soil_temp_c` is Fahrenheit | SENS-07 | high | data problem — unit error |
 | **F2** | clock is 2h out, and dates use DD/MM | SENS-07 | high | data problem — clock/timezone |
 | **F3** | moisture frozen at exactly 25.01 for 14 days | SENS-06 | high | sensor fault — dead channel |
@@ -72,7 +72,7 @@ So the idea is not silly.
 ### Where it becomes counterproductive
 
 | Cost | Why it matters |
-|---|---|
+|:---|:---|
 | **Grain ambiguity** | What is "the plant's moisture"? You must pick an aggregation, and the reflex answer — average them — produces a number describing *neither* pot |
 | **Averaging hides faults** | A stuck sensor at 25 averaged with a healthy one at 45 gives a plausible 35. The pipeline hides a hardware failure |
 | **User-facing contradiction** | If they disagree, which number does the app show? |
@@ -80,7 +80,7 @@ So the idea is not silly.
 ### What this dataset shows
 
 | | Two probes in one pot (*expected*) | UP-1001 / UP-1003 (*actual*) |
-|---|---|---|
+|:---|:---|:---|
 | Correlation | high positive — shared water | **−0.076 / +0.140** |
 | Response to watering | both rise, one lags | unrelated |
 
@@ -157,7 +157,7 @@ predictions and sensor data**. Only the sensors measure anything; the other
 three are reports *about* the plant.
 
 | Source | Answer |
-|---|---|
+|:---|:---|
 | **Plant species** | One substrate per species ✅ — but static, so it can never be checked against a date (F13) |
 | **Contextual logs** | One `log_type` per phrase ✅ (14 phrases) — but unrelated to the sensor (F11) |
 | **Image predictions** | Internally consistent ✅ — agrees with the sensors on water at r = 0.75. **Whether that is corroboration or an artefact of the generator is unestablished** (see below). Independent heads never fire |
@@ -204,7 +204,7 @@ Grain is `(user_plant_id, ts_aligned)`, declared **and asserted** — 11,903 row
 0 duplicate keys.
 
 | Plant | Rows | Probes | Longest gap |
-|---|---|---|---|
+|:---|:---|:---|:---|
 | UP-1001 Monstera | 2,016 | 2 | 0.2 h |
 | UP-1002 Ficus | 2,016 | 1 | 0.2 h |
 | UP-1003 Zamioculcas | 2,016 | 2 | 0.2 h |
@@ -247,7 +247,7 @@ The brief's example: a fertilising log should raise `ec_us_cm` **and** the image
 model should return `Nutrient deficiency`. Three legs, five events.
 
 | Leg | Should show | Does it? |
-|---|---|---|
+|:---|:---|:---|
 | **The log** | fertiliser was added | ✅ 5 events |
 | **The sensor** | EC rises | ❌ `dEC` is **0.01–0.11σ** of that device's own step noise; 2 of 5 are negative |
 | **The model** | `Nutrient deficiency` responds | ❌ never exceeds 0.073 on any photo (§Task 4) |
@@ -265,7 +265,7 @@ line — SENS-03's gain drift (F4), not chemistry. A separate defect sitting on 
 same plant is what makes the false positive convincing.
 
 | UP-1002, one fertilising log | 24 h window | whole record |
-|---|---|---|
+|:---|:---|:---|
 | `dEC` | +4 µS/cm | **+1,289 µS/cm** |
 | against the device's step noise | **0.07σ** | — |
 | reading | flat | *looks* like a response |
@@ -374,7 +374,7 @@ second load identical to the first: True
 Interpreting it as one is what makes the file readable at all.
 
 | Task 1 **may** | Task 1 **must not** |
-|---|---|
+|:---|:---|
 | Interpret text as typed values | Change a value |
 | Add derived columns | Drop or add rows |
 | Reorder rows | Empty, clip, fill in, or dedupe |
@@ -417,7 +417,7 @@ SENS-07 after the clock fix:   r = 0.9843   <- but MISSES the unit error
 **Correlation catches timing problems. It cannot catch scale problems.**
 
 | Test | Catches | Cannot catch |
-|---|---|---|
+|:---|:---|:---|
 | correlation | timing errors, dead devices | unit or scale errors |
 | mean and spread | level shifts, scaling | timing |
 | fitting a line (`a` and `b`) | both, and tells them apart | needs a shared signal |
@@ -510,7 +510,7 @@ under investigation broke the investigation.**
 It causes exactly two findings:
 
 | Finding | From the two-sensor mapping? |
-|---|---|
+|:---|:---|
 | **F9** joins multiply rows | yes, directly |
 | **F10** sensors do not correlate | yes, that *is* the finding |
 | Task 5, the per-plant table | yes, blocked by it |
@@ -518,7 +518,7 @@ It causes exactly two findings:
 And the five most serious findings are on plants with **one** sensor:
 
 | Finding | Device | Plant | Sensors there |
-|---|---|---|---|
+|:---|:---|:---|:---|
 | F1 Fahrenheit | SENS-07 | UP-1005 | 1 |
 | F2 clock error | SENS-07 | UP-1005 | 1 |
 | F4 EC drift | SENS-03 | UP-1002 | 1 |
@@ -571,7 +571,7 @@ A long run of them is a real change. Emptying it would delete history.
 ## 2.8 "Outside the range" and "definitely wrong" are different
 
 | Condition | What to do | Why |
-|---|---|---|
+|:---|:---|:---|
 | Physically impossible (moisture below 0, humidity above 100) | **empty it** | it cannot be true |
 | Outside the specified range but possible (moisture 65–107%) | **flag it, keep it** | the device is not *specified* to be accurate there |
 
@@ -618,7 +618,7 @@ produces confident nonsense.**
 ### The general form
 
 | Check type | Sees | Blind to |
-|---|---|---|
+|:---|:---|:---|
 | range against a constant | impossible magnitudes | context violations |
 | against the device's own history | unusual magnitudes | timing |
 | **against its neighbours** | **duration and shape** | slow drifts |
@@ -676,7 +676,7 @@ they still agree.**
 An honest record. Most of these were caught by a mechanism, not by care.
 
 | What | Caught by | The lesson |
-|---|---|---|
+|:---|:---|:---|
 | Said the schedule check resolves the ambiguous date | **Testing it** — reading it month-first still scores 99% on the grid | A consistent misread keeps the spacing. Impossibility is the evidence |
 | The Fahrenheit evidence looked weak | Re-testing after the clock fix | See 2.4 — one problem hiding another |
 | `import re` and `from __future__` were unused | **ponytail-review** | I had claimed the file was lean. It wasn't |
@@ -760,7 +760,7 @@ Cross-referenced to `decision_register.md`, listed here so the report can name
 them.
 
 | # | Open question | Who can answer | What it blocks |
-|---|---|---|---|
+|:---|:---|:---|:---|
 | **D1** | Are the spec ranges current for this device generation? | Hardware | every flag and empty value |
 | **D2** | Is 15 minutes the configured rate, or a buffer flush? | Firmware | the completeness numbers |
 | **D3** | Is SENS-07's 2h offset a timezone, or a clock fault? | Firmware | testable — it becomes 1h in winter |

@@ -145,7 +145,7 @@ Do not add any box, arrow, band, text or annotation that is not listed.
 Count the boxes first — that is where duplication shows up.
 
 | | Boxes | Must appear exactly once |
-|---|---|---|
+|:---|:---|:---|
 | **Variant A** | 12 | BLE Soil Sensor · Phone App / Hub · Redpanda · Python Checks · MinIO · dbt · DuckDB · Postgres · Grafana · Metabase · MLflow · Quarantine |
 | **Variant B** | 12 | BLE Soil Sensor · Phone App / Hub · AWS IoT Core · Basic Ingest · Amazon S3 · dbt · RDS Postgres · Managed Grafana · QuickSight · SageMaker · Quarantine · Kinesis (optional) |
 

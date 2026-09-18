@@ -51,7 +51,7 @@ unit pandas 2.3.3 still uses, so every `pd.Timedelta` warns.
 ## 2. Done — Tasks 1, 2, 3
 
 | Task | State |
-|---|---|
+|:---|:---|
 | **1 — Ingest & orient** | ✅ §1–5. Load, structure, channels, events, two figures. **Proven non-destructive** |
 | **2 — Data quality** | ✅ §6–7. 10 detectors → 13 findings → detection-coverage table |
 | **3 — Cleaning** | ✅ §8. Two-tier treatment, 12-check audit gate, 1,415 rejections |
@@ -179,7 +179,7 @@ unsupported, and the synthetic generator is the reason neither is earned.
 ## 5. Open items — each with an owner
 
 | # | Question | Owner |
-|---|---|---|
+|:---|:---|:---|
 | D1 | Are the spec ranges current for this generation? | Hardware |
 | D2 | Is 15 min the configured rate or a buffer flush? | Firmware |
 | D3 | SENS-07 +2h: timezone or clock fault? | Firmware |
@@ -199,7 +199,7 @@ unsupported, and the synthetic generator is the reason neither is earned.
 ## 6. Corrections made — do not repeat these
 
 | Believed | Reality | Caught by |
-|---|---|---|
+|:---|:---|:---|
 | The cadence check resolves the date ambiguity | It does not — a uniform misread still scores 99%. Impossibility is the evidence | Testing it |
 | SENS-07's Fahrenheit evidence looked weak | The **clock offset was contaminating it**. After −2h: 0.444 vs 0.380 control | Re-testing |
 | **Light at night is impossible** | **Wrong.** A person can switch a lamp on | **Your correction** |

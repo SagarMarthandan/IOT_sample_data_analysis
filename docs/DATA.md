@@ -14,7 +14,7 @@ field means, how the tables relate, and where the meaning runs out.
 Provenance of every claim is tagged:
 
 | Tag | Meaning |
-| --- | --- |
+| :--- | :--- |
 | **[D]** | From FYTA's published documentation — citable, but verify against the actual device generation |
 | **[M]** | **Measured** from this sample — reproducible from `data/` |
 | **[I]** | **Inferred** — reasoning from [D] + [M], not stated by either |
@@ -62,7 +62,7 @@ different currencies. Neither is wrong; they are just not the same unit.
 ### Glossary
 
 | Term | What it actually means |
-| --- | --- |
+| :--- | :--- |
 | **VWC** — Volumetric Water Content | The share of the pot's *volume* that is water. Fill a 1-litre pot; if 0.3 litres of it is water, that is 30 % VWC. Volume, not weight. |
 | **EC** — Electrical Conductivity | How well the soil carries electricity. Dissolved fertiliser salts make water conductive, so EC ≈ "how much plant food is in there". |
 | **PAR** | The part of light plants can actually use to grow — roughly the light we can see. Measured as light particles hitting a square metre each second. **Not the same as brightness:** a bright green lamp can be almost useless to a plant. |
@@ -82,7 +82,7 @@ different currencies. Neither is wrong; they are just not the same unit.
 Used in §2. It is just a measure of "do these two move together?"
 
 | Value | Means |
-| --- | --- |
+| :--- | :--- |
 | **+1.0** | Move together perfectly |
 | **+0.9** | Very strongly linked — for practical purposes the same signal |
 | **0** | No relationship at all |
@@ -182,7 +182,7 @@ Capped at 100 % by definition — the air cannot be more than completely full.
 ### The same five, as a table
 
 | Field | Unit | How it is measured | Key caveat |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `soil_moisture_vwc` | % vol | electrical response via prongs → converted per substrate | A *derived* value. Substrate-dependent. Spec **0–65 %**, ±5 % **[D]** |
 | `soil_temp_c` | °C | temperature sensor on the prongs | Also corrects the other channels. Ambient spec −5 … 50 °C **[D]**; values reach **78** **[M]** |
 | `ec_us_cm` | µS/cm | conductivity between the same prongs | **Coupled to moisture** **[I]**. Published unit is mS/cm — this column is µS/cm (÷1000) **[D]** |
@@ -194,7 +194,7 @@ Capped at 100 % by definition — the air cannot be more than completely full.
 Measured over this sample **[M]** — see §0 for how to read these numbers:
 
 | Signal | Correlation between devices (median) | In plain terms |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | light | **0.998** | essentially the same signal everywhere |
 | soil temperature | **0.974** | essentially the same signal everywhere |
 | air humidity | **0.946** | strongly shared |
@@ -216,7 +216,7 @@ same by construction. For moisture and EC, that test is meaningful.
 All figures **[M]**. "Grain" = what one row represents (§0).
 
 | File | Rows | Grain | Entities | Time span | Role |
-| --- | --- | --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | `fyta_sensor_sample.csv` | 15,950 | `device_id` + `timestamp` | 8 devices | 21 days @ 15 min | The readings |
 | `fyta_contextual.csv` | 49 | `log_id` | 6 plants | same window | What the human did |
 | `fyta_images.csv` | 28 | `image_id` | 6 plants | same window | Model guesses about photos |
@@ -232,7 +232,7 @@ isn't — see §7.
 ### Count them once, carefully — they are different numbers
 
 | | Count | What it refers to |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | **Sensors** | **8** | `SENS-01` … `SENS-08`. Physical devices pushed into a pot |
 | **Plants** | **6** | `UP-1001` … `UP-1006`. A registered plant — one per pot |
 
@@ -284,7 +284,7 @@ about *direction*.
 Measured over the full window **[M]**:
 
 | Plant | Its two sensors | Correlation | Reads as |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | UP-1001 Monstera | SENS-01, SENS-02 | **−0.076** | unrelated |
 | UP-1003 Zamioculcas | SENS-04, SENS-06 | **0.140** | unrelated |
 
@@ -306,7 +306,7 @@ that pot? This blocks Task 5 (the per-plant table) for those two plants.
 ### `fyta_sensor_sample.csv`
 
 | Column | Type | Meaning | Notes |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `device_id` | str | Sensor identifier | `SENS-01` … `SENS-08`. Unique in the map |
 | `timestamp` | str→datetime | **Local** reading time | Brief says *local*, not UTC. **Two different text formats present** — §6 |
 | `substrate_label` | str | Growing medium **the user picked in the app** | 3 values. One per device **[M]**. This selects the conversion table **[D]** — so it is a *setting that changes the number*, not a description |
@@ -322,7 +322,7 @@ FYTA ships **20+** substrate profiles **[D]**; this sample exercises three.
 ### `fyta_contextual.csv`
 
 | Column | Type | Meaning | Notes |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `log_id` | str | Event identifier | Sequential `LOG-00000` … `LOG-00048` **[M]** |
 | `user_plant_id` | str | Which plant | Links to the map |
 | `log_type` | str | Event category | 4 values: `watering` (34), `light` (7), `fertilising` (5), `repotting` (3) **[M]** |
@@ -341,7 +341,7 @@ numbers are trustworthy. **[I]**
 ### `fyta_images.csv`
 
 | Column | Type | Meaning | Notes |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `image_id` | str | Image identifier | Format `IMG-<plant#>-<YYYYMMDDHHMM>` — **fully reconstructable** from the other columns, verified on all 28 rows **[M]** |
 | `user_plant_id` | str | Which plant | Links to the map |
 | `captured_at` | str→datetime | When the photo was taken | All between 09:00 and 18:00 **[M]** |
@@ -375,7 +375,7 @@ Three things to know before you use it:
 ### `user_plant_device_map.csv`
 
 | Column | Type | Meaning | Notes |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `user_plant_id` | str | Plant instance | **Repeated** — 2 plants occupy 2 rows each |
 | `device_id` | str | Sensor | **Unique** — which is what makes the sensor join safe |
 | `species` | str | Species name | 6 values, free text. Only 3 are proper two-word scientific names (`Pothos`, `Basil (indoor)` and `Phalaenopsis orchid` are not) **[M]** |
@@ -398,7 +398,7 @@ Over the 21-day window each device should therefore have **2,016 readings** **[M
 What we actually have **[M]**:
 
 | Device | Readings | Missing | Extra | Longest silence | Notes |
-| --- | --- | --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | SENS-01 … 04, 06 | 2,016 | 0 | 0 | 15 min | clean |
 | SENS-05 | 1,823 | **193** | 0 | **48.5 hours** | went silent 06-12 23:45 → 06-15 00:15 |
 | SENS-07 | 2,016 | 0 | 0 | 15 min | **runs 02:00 → 01:45** instead of 00:00 → 23:45, ending one day later (06-22) |
@@ -407,7 +407,7 @@ What we actually have **[M]**:
 ### Two different date formats in one column **[M]**
 
 | Format | Rows | Devices |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | `2026-06-01 00:00:00` | 13,934 | all except SENS-07 |
 | `01/06/2026 02:00` | 2,016 | SENS-07 only |
 
@@ -465,7 +465,7 @@ What that means in practice:
 Checked against FYTA's published specification **[D]** and against physics.
 
 | Field | Range in this data **[M]** | Allowed | Verdict |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `soil_moisture_vwc` | −5.43 … **107.12** | 0–65 %, ±5 % **[D]** | Impossible **both ways**: 12 readings below 0 (SENS-08), 431 above 65 % (SENS-04) |
 | `soil_temp_c` | 16.10 … **78.01** | −5 … 50 °C **[D]** | 78 °C cannot happen in a pot. Converted from Fahrenheit, 78.01 °F = 25.6 °C — which matches every other device **[I]** |
 | `ec_us_cm` | 556 … **2266** (0.56 … 2.27 mS/cm) | 0.3–1.7 mS/cm **[D]** | 354 readings above the published range (SENS-03) |
@@ -489,7 +489,7 @@ spec* and is not a fault — it is what the device is allowed to do.
 Verified by actually running the joins **[M]**:
 
 | Join | Rows before | Rows after | Safe? |
-| --- | --- | --- | --- |
+| :--- | :--- | :--- | :--- |
 | `sensor` joined to `map` on `device_id` | 15,950 | 15,950 | ✅ fine — `device_id` appears once per row in the map |
 | `contextual` joined to `map` on `user_plant_id` | 49 | **67** | ❌ **rows duplicated ×2** |
 | `images` joined to `map` on `user_plant_id` | 28 | **35** | ❌ **rows duplicated ×2** |
@@ -525,7 +525,7 @@ by plant and time window — never a plain match on plant alone.
 State these as limits. Do not paper over them with assumptions.
 
 | Question | Why the data cannot answer it |
-| --- | --- |
+| :--- | :--- |
 | Is a photographed plant actually diseased? | `image_path` is a link. **The photos are not in this dataset** |
 | How much water does a pot hold? | No pot size, no drainage, no volume. `"Watered ~200ml"` is the only quantity, and only in some logs |
 | How deep is each probe? | Probe lengths vary (3–35 cm) **[D]** and the map does not record which was used |
@@ -537,7 +537,7 @@ State these as limits. Do not paper over them with assumptions.
 ### Who to ask
 
 | Question | Who |
-| --- | --- |
+| :--- | :--- |
 | Which device generation produced this; are the spec ranges current? | Gregor / hardware |
 | Why is SENS-07 two hours out — timezone or clock? | Firmware |
 | Two devices on one plant: real, or a mapping bug? | Product / whoever owns the map |

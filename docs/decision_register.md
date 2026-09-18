@@ -15,7 +15,7 @@ taken with the wrong premise is a re-run, not a patch.
 ## Summary
 
 | # | The choice | Rests on | Owner | Impact if wrong |
-|---|---|---|---|---|
+|:---|:---|:---|:---|:---|
 | **D1** | SPEC ranges are the validity thresholds | Ranges scraped from the website, aggregated across product generations | Hardware | Flags the wrong readings — or misses real ones |
 | **D2** | 15 min = the sensor's **maximum** rate | Reporting-rate spec | Firmware | Expected slots off by 4×; completeness numbers meaningless |
 | **D3** | SENS-07's clock corrected by a constant −2 h | Timezone, not a drifting clock | Firmware | Wrong at the window edges if the clock drifts |
@@ -317,7 +317,7 @@ in `SPEC`.
 ## Who owns what
 
 | Conversation | Decisions to settle |
-|---|---|
+|:---|:---|
 | **Hardware** | D1 (ranges, generation), D12 (soil temp spec) |
 | **Firmware** | D2 (cadence), D3 (timezone vs clock), D4 (°F scope), D6 (stall signature), D9 (behaviour at 00:00), D13 (light spikes) |
 | **Product / Backend** | D7 (substrate historisation), D10 (co-location), D11 (two sensors) |
