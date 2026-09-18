@@ -55,7 +55,7 @@ unit pandas 2.3.3 still uses, so every `pd.Timedelta` warns.
 | **1 — Ingest & orient** | ✅ §1–5. Load, structure, channels, events, two figures. **Proven non-destructive** |
 | **2 — Data quality** | ✅ §6–7. 10 detectors → 13 findings → detection-coverage table |
 | **3 — Cleaning** | ✅ §8. Two-tier treatment, 12-check audit gate, 1,415 rejections |
-| **4 — Source agreement** | ✅ §9. Four sources, four answers. The image model's agreement is circular |
+| **4 — Source agreement** | ✅ §9. Four sources, four answers. The image model's independence is unestablished |
 | **5 — Feature table** | ✅ §10. Grain `(user_plant_id, ts_aligned)`, asserted. Probes kept side by side |
 | **6 — Triangulation** | ✅ §11. Negative, for three structural reasons. The window is the trap |
 | **7 — Pipeline design** | ✅ §12. Sketch only. Two variants, one decision rule, both diagrams rendered |
@@ -255,11 +255,13 @@ one thing.
 ("a person can turn on a light"), and skepticism about necessity ("is that
 unnecessary?"). Three of the four corrections came from those.
 
-**The circularity argument, and why it decides Task 4.** The image model agrees
-with the moisture sensor at r ≈ 0.75. The naive reading is "validated." The
-correct reading is that the model's dominant signal *is* moisture, so agreement
-is a restatement. Nothing in the code says this — the numbers support either
-conclusion, and only the argument picks between them.
+**The independence argument, and why it decides Task 4.** The image model agrees
+with the moisture sensor at r ≈ 0.75. The naive reading is "validated." An early
+draft called it "circular" — also wrong, since two instruments on one latent
+variable *is* corroboration. The defensible reading is narrower than both: the
+model adds nothing beyond water status, and the dataset is **synthetic**, so
+whether even that is independent is unverifiable without lineage from the vendor.
+The numbers support any of the three; only the argument picks between them.
 
 **Why one code path matters here.** `assess_source()` exists so the raw and
 cleaned arms cannot drift. The notebook drifting from the script has now bitten

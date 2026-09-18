@@ -127,6 +127,23 @@ def audit(cleaned: pd.DataFrame, raw: pd.DataFrame, rejections: pd.DataFrame) ->
                    not orphaned,
                    f"unexplained: {orphaned or 'none'}"))
 
+    # Flags must reconcile with their detector too, not only rejections. The
+    # first version of this gate checked the dark-hour flags and stopped there:
+    # stripping all 736 `outside_spec` flags still passed all 13 checks, so the
+    # gate could approve data where every out-of-spec warning had vanished.
+    #
+    # Nulled values are excluded by `notna()`: an impossible reading has already
+    # been emptied and recorded as a rejection, so it is not double-counted here.
+    for channel, (lo, hi) in SPEC.items():
+        col = f"{channel}_clean"
+        detected = cleaned[col].notna() & ((cleaned[col] < lo) | (cleaned[col] > hi))
+        flagged = cleaned["qc_flags"].fillna("").str.contains(f"{channel}:outside_spec")
+        missed, extra = int((detected & ~flagged).sum()), int((~detected & flagged).sum())
+        checks.append((f"{channel}: outside_spec flags match the detector",
+                       missed == 0 and extra == 0,
+                       f"{int(detected.sum())} detected -- {missed} unflagged, "
+                       f"{extra} flagged but in range"))
+
     # `ts_aligned` is the right time base here: the ceiling is a time-of-day
     # question, so a device with a clock offset must be judged on real local
     # time, not on what its clock said.

@@ -141,6 +141,10 @@ UP-1004 SENS-05              6                 0
 UP-1005 SENS-07              6                 1
 UP-1006 SENS-08              5                 0
 
+-- EC drift fit
+ device               onset  ramp_per_day     r2  whole_record_per_day
+SENS-03 2026-06-11 19:45:00         136.0 0.9902                  72.7
+
 -- cross-device correlation
           channel  mean_pairwise_r
 soil_moisture_vwc            0.201
@@ -196,7 +200,7 @@ F3  SENS-06 moisture frozen at exactly 25.01 for 14 days   [SENS-06]
     next     : null the frozen window; do not treat 25.01 as a reading
 
 F4  SENS-03 EC climbs monotonically, no logged cause   [SENS-03]
-    detected : 136 uS/cm/day at R2=0.99; 354 out-of-range readings in 17 runs -- 346 of them inside a run (longest 307), only 8 isolated; no fertilising log near onset; the four devices that WERE fertilised show no EC response (-6..+3 against daily noise 42)
+    detected : a straight climb from 06-11 -- see the drift fit in the evidence above for the onset, rate and R2; 354 out-of-range readings in 17 runs, 346 of them inside a run (longest 307), only 8 isolated; no fertilising log near onset; the four devices that WERE fertilised show no EC response (section 6a)
     severity : high    class: sensor fault - drift
     next     : exclude EC for this device, or recalibrate; ask calibration whether a straight-line climb is possible
 
@@ -226,7 +230,7 @@ F9  user_plant_id is not unique, so log/image joins multiply rows   [all]
     next     : dedupe the mapping to one row per plant before joining
 
 F10  Two plants have two sensors, and the pairs do not correlate   [UP-1001, UP-1003]
-    detected : r = -0.076 and +0.103, n=2016 each. SENS-06 is frozen for 1,344 of its samples, which attenuates the second toward zero -- so the true disagreement is worse than the number. Same-pot probes share a reservoir and must move together
+    detected : r = -0.076 and +0.103 over the full overlap; excluding SENS-06's 1,344 frozen samples the second is +0.140. Both are near zero, so the probes do not move together either way -- the frozen stretch pulls the figure toward zero rather than hiding a stronger relationship. Same-pot probes share a reservoir and must move together
     severity : high    class: unknown - real config or mapping bug
     next     : ask product whether the app allows two sensors per plant; do not average
 
@@ -336,20 +340,24 @@ impossible          71
   air_humidity_pct   raw [   27.50,   131.00]   clean [   27.50,    87.90]   nulls 10
 
 -- audit gate (nothing publishes unless every check passes)
-                                                check  passed                                  detail
-                             no duplicate keys remain    True                              15 dropped
-         soil_moisture_vwc: no impossible values left    True                                0 remain
-               soil_temp_c: no impossible values left    True                                0 remain
-                  ec_us_cm: no impossible values left    True                                0 remain
-                 light_par: no impossible values left    True                                0 remain
-          air_humidity_pct: no impossible values left    True                                0 remain
-                                raw columns untouched    True     all 5 raw channels match the source
-          every rejection is null in its clean column    True 0 of 1415 rejections still hold a value
-                 every null has a rejection behind it    True                       unexplained: none
-every dark-hour spike is flagged, and nothing else is    True                   8 detected, 8 flagged
-                         every rejection has a reason    True                1415 rejections recorded
-                 detected unit outliers are all fixed    True detected ['SENS-07'], fixed ['SENS-07']
-                declared unit fixes were all detected    True fixed ['SENS-07'], detected ['SENS-07']
+                                                   check  passed                                              detail
+                                no duplicate keys remain    True                                          15 dropped
+            soil_moisture_vwc: no impossible values left    True                                            0 remain
+                  soil_temp_c: no impossible values left    True                                            0 remain
+                     ec_us_cm: no impossible values left    True                                            0 remain
+                    light_par: no impossible values left    True                                            0 remain
+             air_humidity_pct: no impossible values left    True                                            0 remain
+                                   raw columns untouched    True                 all 5 raw channels match the source
+             every rejection is null in its clean column    True             0 of 1415 rejections still hold a value
+                    every null has a rejection behind it    True                                   unexplained: none
+soil_moisture_vwc: outside_spec flags match the detector    True 382 detected -- 0 unflagged, 0 flagged but in range
+         ec_us_cm: outside_spec flags match the detector    True 354 detected -- 0 unflagged, 0 flagged but in range
+ air_humidity_pct: outside_spec flags match the detector    True   0 detected -- 0 unflagged, 0 flagged but in range
+        light_par: outside_spec flags match the detector    True   0 detected -- 0 unflagged, 0 flagged but in range
+   every dark-hour spike is flagged, and nothing else is    True                               8 detected, 8 flagged
+                            every rejection has a reason    True                            1415 rejections recorded
+                    detected unit outliers are all fixed    True             detected ['SENS-07'], fixed ['SENS-07']
+                   declared unit fixes were all detected    True             fixed ['SENS-07'], detected ['SENS-07']
 
   published: cleaned_sensor.csv (15935 rows), qc_rejections.csv (1415 rows)
 
@@ -465,14 +473,14 @@ UP-1006       Pothos                  2016       1         0.994            0.2
 ==============================================================================
 6a. TRIANGULATION - can three sources confirm a fertilising event?
 ==============================================================================
-      log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  hours_off  nutrient_def sensor_leg model_leg
-LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30       26.5         0.050    no rise    silent
-LOG-00009 UP-1002 06-01 20:00  3.974    58.114        0.07 06-01 09:15      -10.8         0.051    no rise    silent
-LOG-00020 UP-1003 06-12 10:00  0.604    58.493        0.01 06-14 10:00       48.0         0.033    no rise    silent
-LOG-00024 UP-1003 06-19 10:00 -3.115    58.493       -0.05 06-20 13:00       27.0         0.002    no rise    silent
-LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11         NaN        NaN           NaN    no rise  no image
+      log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  hours_off  nutrient_def sensor_leg           model_leg
+LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30       26.5         0.050    no rise              silent
+LOG-00009 UP-1002 06-01 20:00  3.974    58.114        0.07         NaN        NaN           NaN    no rise no post-event image
+LOG-00020 UP-1003 06-12 10:00  0.604    58.493        0.01 06-14 10:00       48.0         0.033    no rise              silent
+LOG-00024 UP-1003 06-19 10:00 -3.115    58.493       -0.05 06-20 13:00       27.0         0.002    no rise              silent
+LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11         NaN        NaN           NaN    no rise no post-event image
 
-  5 fertilising logs: 0 with an EC rise, 0 with a model response, 1 with no photo in window.
+  5 fertilising logs: 0 with an EC rise, 0 with a model response, 2 with no photo after the event.
 
   Triangulation does not occur -- and not because the effect is weak. Two of the
   three legs carry no fertiliser signal at all: every dEC sits inside one step of

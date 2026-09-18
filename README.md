@@ -38,7 +38,7 @@ submission/
     signals.py              Tasks 8, 9 — a derived signal, log text
   fyta_pipeline.py        entry point + printed narrative
   fyta_analysis.ipynb     the same results, rendered
-  test_gates.py           regression checks for the three corrected defects
+  test_gates.py           regression checks for the four corrected defects
   WRITEUP.md / .pdf       the one-page submission note
   md_to_pdf.py            builds the PDF: markdown -> HTML -> headless Chrome
   out/                    published artefacts and the run log

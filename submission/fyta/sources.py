@@ -102,7 +102,8 @@ def assess_source(sensor: pd.DataFrame, value: str, heads: pd.DataFrame,
 LEG_SIGMA = 3.0
 #: The image model has to actually assert something before it can corroborate.
 LEG_PROB = 0.10
-#: How close a photo must be to the event to count as evidence about it.
+#: How close a photo must be AFTER the event to count as evidence about it.
+#: Asymmetric on purpose -- a photo taken before cannot be a response to it.
 IMAGE_WINDOW_H = 48.0
 
 
@@ -125,6 +126,10 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
 
     A fix is on the same plant as the drift, so the two must be separated by
     timing, not by magnitude.
+
+    The image window is ASYMMETRIC for the same reason. Only photos taken after
+    the event are considered, and the model leg reports a score LEVEL, not a
+    change -- see the note at the legs below.
     """
     win = pd.Timedelta(window)
     rows = []
@@ -139,20 +144,20 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
                             "ec_us_cm_clean"].diff().std()
 
         near = heads[heads["user_plant_id"] == plant]
-        # Nearest photo WITHIN a tolerance, keeping the SIGN. An unbounded
-        # nearest-neighbour happily returns a photo 110 hours away and calls it
-        # evidence about this feed; `timedelta.days` also truncates toward zero,
-        # so a photo 10.75 hours BEFORE an event reported as one day away.
-        in_window = near
-        if len(near):
-            hours = (near["captured_at"] - at).dt.total_seconds() / 3600
-            in_window = near.loc[hours.abs() <= IMAGE_WINDOW_H]
-        if len(in_window):
-            offs = (in_window["captured_at"] - at).dt.total_seconds() / 3600
-            pick = offs.abs().idxmin()
-            image_at = in_window.loc[pick, "captured_at"]
+        hours = ((near["captured_at"] - at).dt.total_seconds() / 3600
+                 if len(near) else pd.Series(dtype=float))
+        # ASYMMETRIC window. A photo taken BEFORE a fertilising event cannot be a
+        # response to it. The first version used `hours.abs() <= 48`, so a fixture
+        # whose only photo was 2.5 hours EARLIER came back corroborated=True.
+        post = near.loc[(hours >= 0) & (hours <= IMAGE_WINDOW_H)] if len(near) else near
+        only_pre = bool(len(near) and not len(post)
+                        and ((hours < 0) & (hours >= -IMAGE_WINDOW_H)).any())
+        if len(post):
+            offs = (post["captured_at"] - at).dt.total_seconds() / 3600
+            pick = offs.idxmin()
+            image_at = post.loc[pick, "captured_at"]
             hours_off = round(float(offs.loc[pick]), 1)
-            nutrient = float(in_window.loc[pick, "Nutrient deficiency"])
+            nutrient = float(post.loc[pick, "Nutrient deficiency"])
         else:
             image_at, hours_off, nutrient = pd.NaT, None, None
 
@@ -160,6 +165,7 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
             "log": lg["log_id"], "plant": plant, "fertilised": at,
             "d_ec": after.mean() - before.mean(), "noise_sd": noise,
             "image": image_at, "hours_off": hours_off, "nutrient_def": nutrient,
+            "only_pre_event_image": only_pre,
         })
 
     out = pd.DataFrame(rows)
@@ -169,10 +175,14 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
     # once quietly renamed from "rises" to "moves" to match the code, which hid
     # the error rather than fixing it.
     out["sensor_leg"] = (out["d_ec_sigma"] > LEG_SIGMA).map({True: "rises", False: "no rise"})
-    # Three states, not two: "no image in window" is not the same finding as
-    # "the model looked and stayed silent".
-    out["model_leg"] = "silent"
-    out.loc[out["nutrient_def"].isna(), "model_leg"] = "no image"
+    # "no post-event image" is not the same finding as "the model looked and
+    # stayed silent", so it is its own state. And even a post-event score is a
+    # LEVEL, not a change: it shows the symptoms were present after the feed, not
+    # that the model responded to it. A pre/post comparison would test the latter,
+    # but 28 photos across 5 events rarely put one on each side of an event.
+    out["model_leg"] = "no post-event image"
+    out["nutrient_def"] = pd.to_numeric(out["nutrient_def"], errors="coerce")
+    out.loc[out["nutrient_def"].notna() & (out["nutrient_def"] <= LEG_PROB), "model_leg"] = "silent"
     out.loc[out["nutrient_def"].fillna(0) > LEG_PROB, "model_leg"] = "responds"
     out["corroborated"] = out["sensor_leg"].eq("rises") & out["model_leg"].eq("responds")
     return out

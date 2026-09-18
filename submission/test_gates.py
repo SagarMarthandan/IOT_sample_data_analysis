@@ -84,9 +84,36 @@ def test_a_falling_ec_does_not_corroborate():
         f"a fall was treated as corroboration: {out['sensor_leg'].iloc[0]!r}"
 
 
+def test_a_pre_event_image_is_not_a_response():
+    """A photo taken before a fertilising event cannot be a response to it.
+
+    The window was `hours.abs() <= 48`, so a fixture whose only photo was 2.5
+    hours EARLIER came back corroborated=True.
+    """
+    ts = pd.date_range("2026-06-01", periods=200, freq="15min")
+    ec = pd.Series(700.0, index=ts)
+    ec.iloc[120:] = 1200.0                     # strong post-event RISE
+    cleaned = pd.DataFrame({"device_id": "SENS-99", "ts_aligned": ts,
+                            "ec_us_cm_clean": ec.to_numpy()})
+    features = pd.DataFrame({"user_plant_id": "UP-99", "ts_aligned": ts,
+                             "ec_1": ec.to_numpy(), "device_1": "SENS-99"})
+    contextual = pd.DataFrame({"log_id": ["L"], "user_plant_id": ["UP-99"],
+                               "log_type": ["fertilising"], "created_at": [ts[100]]})
+    # the ONLY photo is 2.5 hours BEFORE the event, and scores 0.9
+    heads = pd.DataFrame({"user_plant_id": ["UP-99"],
+                          "captured_at": [ts[100] - pd.Timedelta("2.5h")],
+                          "Nutrient deficiency": [0.9]})
+
+    out = triangulate(cleaned, features, contextual, heads)
+    assert out["sensor_leg"].iloc[0] == "rises", "fixture must produce a rise"
+    assert out["model_leg"].iloc[0] == "no post-event image", \
+        f"a pre-event photo was used as a response: {out['model_leg'].iloc[0]!r}"
+    assert not out["corroborated"].iloc[0], "a pre-event photo corroborated the event"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
             fn()
             print(f"  ok  {name[5:].replace('_', ' ')}")
-    print("\n3 of 3 regression checks passed")
+    print(f"\n{sum(1 for n in globals() if n.startswith('test_'))} regression checks passed")

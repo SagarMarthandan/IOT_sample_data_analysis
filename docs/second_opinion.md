@@ -335,3 +335,341 @@ The work demonstrates strong instincts around sensor data, grain, missingness, j
 The present version also signals that a large AI-generated result was not subjected to a final adversarial review. The failed audit mutation is the clearest example: the prose says "nothing publishes unless every check passes," while the check can approve the exact defect it claims to prevent.
 
 A focused correction and a concise one-page narrative would change the impression from **ambitious but insufficiently reviewed** to **strong judgment with honest limits**.
+
+---
+
+# Second Audit: Reassessment After Corrections
+
+## Updated verdict
+
+**Substantially improved, but I would still not submit this exact version.**
+
+The previous blocking omission is fixed: `submission/WRITEUP.md` and the one-page `WRITEUP.pdf` now exist. The three regression checks pass, the main row counts reproduce, and several prior correctness defects were repaired.
+
+My updated score is **approximately 7.3/10**, up from **6.5/10**.
+
+Fix the three issues below before submitting:
+
+1. Correct factual errors in the one-page write-up.
+2. Make the audit verify `outside_spec` flags.
+3. Stop treating a pre-event image score as a post-fertilization response.
+
+After those fixes and a final contradiction cleanup, I would rate it around **8 to 8.5/10** and consider it interview-worthy.
+
+No files were changed during the reassessment. The Git working tree remained clean.
+
+## Verification performed
+
+I compared commit `d6a2893` against the previous version at `ac034cc`, then inspected the current implementation, outputs, notebook, tests, write-up, PDF, and affected documentation.
+
+Fresh in-memory recomputation produced:
+
+| Output | Result |
+|---|---:|
+| Raw sensor rows | 15,950 |
+| Cleaned rows | 15,935 |
+| Rejections | 1,415 |
+| Feature rows | 11,903 |
+| Audit checks | 13 |
+| Baseline audit failures | 0 |
+| Notebook cells | 51 |
+| Stored notebook errors | 0 |
+
+The regression command produced:
+
+```text
+ok  a falling ec does not corroborate
+ok  audit catches an uncleaned frozen window
+ok  run lengths not run starts
+
+3 of 3 regression checks passed
+```
+
+## Material improvements
+
+### Required write-up added
+
+`submission/WRITEUP.md` and `submission/WRITEUP.pdf` now provide the requested one-page deliverable.
+
+The PDF is visually professional and genuinely one page, although dense. This resolves the largest submission-level blocker from the first review.
+
+### Frozen-window audit repaired
+
+`submission/fyta/cleaning.py:107-128` now reconciles rejection records with null values in both directions:
+
+- Every rejection must correspond to a null clean value.
+- Every null clean value must have a rejection record.
+
+The previous adversarial mutation, restoring all 1,344 frozen values, is now caught.
+
+### Range-run classification corrected
+
+Current output correctly reports:
+
+| Device/channel | Runs | Isolated | In runs | Longest run |
+|---|---:|---:|---:|---:|
+| SENS-04 moisture | 11 | 0 | 431 | 44 |
+| SENS-03 EC | 17 | 8 | 346 | 307 |
+
+This fixes the original run-start counting error.
+
+### EC direction corrected
+
+`submission/fyta/sources.py:165-177` now requires:
+
+```python
+d_ec_sigma > LEG_SIGMA
+```
+
+A large EC decrease no longer counts as support for fertilization.
+
+### Image timing improved
+
+The triangulation output now includes:
+
+- Signed `hours_off`.
+- A ±48-hour tolerance.
+- A separate `no image` state.
+
+These changes are materially better than the previous unbounded nearest-image lookup and truncated `days_off`.
+
+### Claims clarified
+
+The revised material now:
+
+- Admits that the SENS-03 drift is not flagged for the full regime.
+- Explains why sparse image/log events are not embedded into every feature-table row.
+- Corrects the unsupported claim that image/sensor agreement is inherently circular.
+- Adds explicit detectors for the F10, F11, and F12 metrics.
+- Corrects the raw row-size calculation.
+- Adds three focused behavioral regression checks.
+
+## Remaining submission blockers
+
+### 1. The required write-up contains incorrect statements
+
+This is the highest-priority issue because reviewers may read only the one-page PDF before deciding whether to inspect the code.
+
+#### SENS-04 is described incorrectly
+
+`submission/WRITEUP.md:69-71` says:
+
+> A counting error made a dead sensor look intermittent. A 431-reading fault was reported as eleven separate glitches. It is one continuous fault.
+
+The current evidence says:
+
+```text
+11 runs
+0 isolated readings
+431 readings in sustained runs
+longest run: 44 readings
+```
+
+It is neither eleven isolated glitches nor one continuous 431-reading fault.
+
+SENS-04 is also classified elsewhere as:
+
+```text
+unknown - fault or different physical setup
+```
+
+It is not established as a dead sensor. The dead channel is SENS-06.
+
+A defensible replacement would be:
+
+> A counting error treated the start of each sustained excursion as an isolated sample. The corrected result is 11 sustained runs containing all 431 out-of-spec readings, with zero isolated readings. The cause remains unresolved.
+
+#### The test statement is false
+
+`submission/WRITEUP.md:64-73` says three defects were fixed and that each has a test. The listed defects are:
+
+1. Frozen-window publication gate.
+2. Run counting.
+3. Hardcoded finding numbers.
+
+The actual tests in `submission/test_gates.py` cover:
+
+1. Frozen-window audit.
+2. Run counting.
+3. Falling EC not counting as corroboration.
+
+No test covers the third defect described in the write-up. The triangulation defect is not mentioned in that section.
+
+The write-up must either describe the actual third regression test or add a real test for the hardcoded evidence issue.
+
+#### The configuration statement is inaccurate
+
+`submission/WRITEUP.md:80-81` says:
+
+> Soil type, sensor model and plant are code today.
+
+Plant mapping and substrate labels are already data. Code currently holds device-specific unit fixes, clock offsets, physical/specification ranges, and other domain constants.
+
+A more accurate statement:
+
+> Move device-family specifications, calibration versions, unit policies, and clock corrections into an effective-dated registry.
+
+### 2. The audit still does not verify quality flags
+
+The rejection/null audit is fixed, but `outside_spec` flags are not reconciled against their detector.
+
+I removed all **736** `outside_spec` flags in memory while preserving the dark-hour flags. Result:
+
+```text
+outside_spec flags removed: 736
+audit failures: 0
+```
+
+All 13 audit checks still passed.
+
+This means the publication gate can approve data where every out-of-spec warning has silently disappeared.
+
+`submission/fyta/cleaning.py` audits dark-hour flags explicitly, but it needs the same detector-to-output reconciliation for each channel in `SPEC`:
+
+- Every detected out-of-spec value must carry the expected flag.
+- No in-spec value should carry that flag.
+- Impossible values that were nulled need clearly defined treatment so they are not double-counted accidentally.
+
+The current write-up says:
+
+> Finding a problem and fixing it are separate jobs, and I check both.
+
+That statement remains too broad until the flags are audited too.
+
+### 3. Task 6 still treats a pre-event image as a response
+
+The image window now has a tolerance, but it is symmetric:
+
+```python
+hours.abs() <= IMAGE_WINDOW_H
+```
+
+The nearest image can therefore occur before fertilization.
+
+I constructed a fresh fixture with:
+
+- Strong post-event EC rise.
+- Nutrient-deficiency score of `0.9`.
+- Image captured 2.5 hours **before** the fertilization event.
+
+The result was:
+
+```text
+d_ec_sigma: 14.03
+hours_off: -2.5
+sensor_leg: rises
+model_leg: responds
+corroborated: True
+```
+
+A pre-event image cannot be a response to a later fertilization event.
+
+The model leg also tests a static score, not a change:
+
+```python
+nutrient_def > 0.10
+```
+
+A high nutrient-deficiency score after fertilization could mean the symptoms persisted. It does not demonstrate that the model responded to the event.
+
+Use one of these interpretations:
+
+- Require a post-event image and call it **temporally aligned evidence**, not a response.
+- Preferably compare pre-event and post-event scores and test for a directionally appropriate change.
+- If only a pre-event image exists, label the model leg `pre-event only` or `not testable`.
+
+Add a regression fixture for this case. The current triangulation test covers EC direction but not image causality.
+
+## Other important issues
+
+### F4 evidence remains hardcoded
+
+`submission/fyta/sensors.py:354-358` contains:
+
+```text
+136 uS/cm/day at R2=0.99
+-6..+3 against daily noise 42
+```
+
+The new detectors made F10, F11, and F12 more reproducible, but I found no implementation that calculates and injects these F4 values into the finding.
+
+The output remains reproducible only in the weak sense that running the code prints the same hardcoded string. The evidence itself is not recomputed.
+
+### Hardware assumptions remain too confident
+
+The production design still asserts:
+
+```text
+320 measurements × 4/hour = approximately 80 hours
+```
+
+FYTA's current technical page distinguishes Beam 1.0 at once per hour and Beam 2.0 at four times per hour, while the 320-measurement storage section is presented for the Beam at once per hour and described as about 13 days. It does not clearly assign that storage limit to Beam 2.0.
+
+The 80-hour watermark should therefore be presented as conditional:
+
+> If the deployed generation buffers 320 readings at four readings per hour, the maximum buffered lateness is approximately 80 hours. Confirm generation-specific storage behavior with firmware.
+
+Related overclaims remain:
+
+- F7 calls the gap recoverable and therefore a sync failure. Power loss or failure to measure remains possible.
+- `docs/DATA.md` attributes humidity to the Beam body, while the current FYTA comparison lists humidity for Sphere, not Beam 1.0 or 2.0.
+- “FYTA already uses AWS” is inferred from synthetic `s3://` image paths.
+- The design sizes average throughput but not relay-upload bursts.
+- The notebook calls the `7.57×` compression ratio measured, but currently stores it as a constant rather than generating it from a reproducible artifact.
+- `docs/PIPELINE_DESIGN.md:32` still says 220 GB/year while the table says 238 GB/year.
+
+Sources:
+
+- [FYTA technical data](https://fyta.de/en/pages/technische-daten)
+- [FYTA Beam G2](https://fyta.de/en/products/fyta-beam-gen2)
+
+### Stale contradictions remain
+
+Examples:
+
+- The notebook Task 4 table still says `r = 0.75 and circular`, immediately followed by text explaining that “circular” was wrong.
+- `docs/HANDOFF.md` still calls the image agreement circular in one section and corrects itself later.
+- The handoff retains stale file, line, module, and cell counts.
+- One handoff section says the write-up remains the next action although the write-up now exists.
+- Older documentation retains superseded F10, F11, F12, spike, and drydown values.
+- `docs/PIPELINE_DESIGN.md` contains the 220/238 GB contradiction.
+
+Not every internal note needs submission polish. The notebook, write-up, README, pipeline design, and generated outputs do.
+
+### Co-located correlation includes known-bad data
+
+The new co-located sensor calculation reports approximately `r = 0.103` for the SENS-04/SENS-06 pair while including the 1,344-sample frozen SENS-06 period.
+
+The valid pre-freeze overlap gives approximately `r = 0.140`.
+
+Both values support the conclusion that the probes do not move together. The numerical conclusion survives, but the statement that the frozen interval attenuates the correlation and makes the “true disagreement worse” is not demonstrated by this comparison.
+
+## Updated scorecard
+
+| Area | Previous | Current | Assessment |
+|---|---:|---:|---|
+| Task 1: ingest and exploration | 9 | **9** | Remains strong |
+| Task 2: data quality | 8 | **8** | Better reproducibility, but F4 still hardcoded |
+| Task 3: cleaning | 5 | **7** | Rejection gate fixed; flag audit still missing |
+| Task 4: source validation | 6 | **7** | Circularity corrected, notebook still contradictory |
+| Task 5: feature table | 6 | **7.5** | Scope is now explicit and defensible |
+| Task 6: triangulation | 4 | **6** | EC direction and tolerance fixed; image-response semantics remain wrong |
+| Task 7: production design | 6 | **6** | Good structure, same hardware and sizing assumptions |
+| Communication/deliverable | 4 | **7** | One-page PDF exists, but contains factual mismatches |
+
+**Overall: approximately 7.3/10.**
+
+## Updated recommendation
+
+The update fixed meaningful defects rather than merely changing prose. That is a positive engineering signal.
+
+Before submitting:
+
+1. Correct `WRITEUP.md:64-81`, then regenerate the PDF.
+2. Add `outside_spec` detector-to-flag reconciliation to the audit.
+3. Reject pre-event images as responses and add a regression check.
+4. Compute or remove the remaining hardcoded F4 metrics.
+5. Remove contradictions from the notebook and submission-facing documents.
+6. Qualify generation-specific hardware assumptions.
+
+After the first three, the submission is defensible. After all six, it becomes a strong interview submission rather than an ambitious draft with remaining confidence gaps.

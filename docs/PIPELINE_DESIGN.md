@@ -29,7 +29,7 @@ beside every cleaned one. That is the price of never destroying the original, an
 at this scale it is still nothing. All figures measured from the shipped sample;
 the compression ratio is a real Parquet+zstd write, not an estimate.
 
-**This is not big data.** 111 msg/s is a single process. 220 GB/year fits on a
+**This is not big data.** 111 msg/s is a single process. 238 GB/year fits on a
 laptop. Any architecture that leads with Spark, a data mesh, or "web-scale
 streaming" is solving a problem this fleet does not have.
 
@@ -50,8 +50,12 @@ relayed: phone app or hub. Two consequences that decide the whole design:
 **Uploads are bursty and human-scheduled.** The app syncs when the phone is open
 and online. A phone offline for three days delivers three days at once.
 
-**The buffer bounds the lateness.** ~320 measurements per device, up to 4/hour →
-**up to ~80 hours late**. So:
+**The buffer bounds the lateness.** ~320 measurements per device. **If the
+deployed generation buffers 320 readings at four per hour**, that is **up to ~80
+hours late** — but the published figures are ambiguous: Beam 1.0 is listed at
+1/hour and Beam 2.0 at 4/hour, and the 320-reading store is described as ~13 days,
+which matches 1/hour. The watermark below is therefore conditional. **Confirm
+generation-specific storage with firmware** (D2/D6). So:
 
 > **Partition by event time, not arrival time.** An 80-hour watermark is normal,
 > not exceptional. Late writes must replay and re-audit the *affected* partition,
@@ -68,7 +72,7 @@ needs. Hand-written, that logic is a test-free liability.
 
 ```
   device ──BLE──▶ phone app / hub
-                        │  HTTPS, bursty, up to 80 h late
+                        │  HTTPS, bursty, late by hours to days
                         ▼
                  ┌─────────────┐
                  │   INGEST    │  auth, schema, per-reading range check

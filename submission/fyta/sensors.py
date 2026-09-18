@@ -352,10 +352,10 @@ FINDINGS = [
      "null the frozen window; do not treat 25.01 as a reading"),
 
     ("F4", "SENS-03 EC climbs monotonically, no logged cause", "SENS-03",
-     "136 uS/cm/day at R2=0.99; 354 out-of-range readings in 17 runs -- 346 of them "
+     "a straight climb from 06-11 -- see the drift fit in the evidence above for "
+     "the onset, rate and R2; 354 out-of-range readings in 17 runs, 346 of them "
      "inside a run (longest 307), only 8 isolated; no fertilising log near onset; "
-     "the four devices that WERE fertilised show no EC response "
-     "(-6..+3 against daily noise 42)",
+     "the four devices that WERE fertilised show no EC response (section 6a)",
      "high", "sensor fault - drift",
      "exclude EC for this device, or recalibrate; ask calibration whether a "
      "straight-line climb is possible"),
@@ -394,10 +394,11 @@ FINDINGS = [
      "dedupe the mapping to one row per plant before joining"),
 
     ("F10", "Two plants have two sensors, and the pairs do not correlate", "UP-1001, UP-1003",
-     "r = -0.076 and +0.103, n=2016 each. SENS-06 is frozen for 1,344 of its "
-     "samples, which attenuates the second toward zero -- so the true disagreement "
-     "is worse than the number. Same-pot probes share a reservoir and must move "
-     "together",
+     "r = -0.076 and +0.103 over the full overlap; excluding SENS-06's 1,344 "
+     "frozen samples the second is +0.140. Both are near zero, so the probes do "
+     "not move together either way -- the frozen stretch pulls the figure toward "
+     "zero rather than hiding a stronger relationship. Same-pot probes share a "
+     "reservoir and must move together",
      "high", "unknown - real config or mapping bug",
      "ask product whether the app allows two sensors per plant; do not average"),
 
@@ -477,6 +478,35 @@ DETECTION_COLS = ["id", "finding", "caught_by", "missed_by"]
 def detection_coverage_frame() -> pd.DataFrame:
     """Detection coverage as a table. Same rows the notebook renders."""
     return pd.DataFrame(DETECTION_COVERAGE, columns=DETECTION_COLS)
+
+
+def ec_drift_fit(sensor: pd.DataFrame, device: str = "SENS-03",
+                 sigma: float = 3.0) -> dict:
+    """Where a device's EC starts climbing, and how fast.
+
+    F4's "136 uS/cm/day at R2=0.99" was HARDCODED -- running the code printed the
+    same string rather than recomputing it, so the number was reproducible only in
+    the weakest sense. The whole-record slope is roughly half that, because the
+    device sits flat for ten days before the ramp starts; the onset has to be
+    found before the ramp can be measured at all.
+    """
+    g = sensor[sensor["device_id"] == device].sort_values("ts")
+    ec = g["ec_us_cm"]
+    baseline = ec.iloc[:len(ec) // 4]
+    climbing = ec > baseline.median() + sigma * baseline.diff().std()
+    if not climbing.any():
+        return {"device": device, "onset": None, "slope_per_day": None, "r2": None,
+                "whole_record_per_day": None}
+    onset = g.loc[climbing.idxmax(), "ts"]
+    ramp = g.loc[g["ts"] >= onset]
+    days = (ramp["ts"] - onset).dt.total_seconds() / 86400
+    slope, intercept = np.polyfit(days, ramp["ec_us_cm"], 1)
+    resid = float(((ramp["ec_us_cm"] - (slope * days + intercept)) ** 2).sum())
+    total = float(((ramp["ec_us_cm"] - ramp["ec_us_cm"].mean()) ** 2).sum())
+    whole = np.polyfit((g["ts"] - g["ts"].min()).dt.total_seconds() / 86400, ec, 1)[0]
+    return {"device": device, "onset": onset,
+            "ramp_per_day": round(float(slope), 1), "r2": round(1 - resid / total, 4),
+            "whole_record_per_day": round(float(whole), 1)}
 
 
 def cross_device_correlation(sensor: pd.DataFrame, channels=None) -> pd.DataFrame:
@@ -570,6 +600,7 @@ def evidence_tables(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.
         # On ALIGNED time. SENS-07's raw clock is two hours off, which drags
         # every shared-ambient correlation down to ~0.8 and conflates this
         # finding with a separate clock defect (F2).
+        "EC drift fit": pd.DataFrame([ec_drift_fit(sensor)]),
         "cross-device correlation": cross_device_correlation(align_clocks(sensor)),
         "co-located probes, same plant": colocated_correlation(sensor, mapping),
         "where a moisture rise lands": rise_timing(sensor),

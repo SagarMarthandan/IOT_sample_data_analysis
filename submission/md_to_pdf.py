@@ -18,7 +18,7 @@ CSS = """
 * { box-sizing: border-box; }
 body {
   font-family: "Latin Modern Roman", "LM Roman 10", "Computer Modern", serif;
-  font-size: 9.3pt; line-height: 1.27; color: #16181d; margin: 0;
+  font-size: 9.3pt; line-height: 1.25; color: #16181d; margin: 0;
   -webkit-font-smoothing: antialiased;
 }
 h1 { font-size: 17pt; margin: 0 0 1mm; letter-spacing: -0.2pt; }

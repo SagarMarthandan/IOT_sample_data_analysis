@@ -20,14 +20,13 @@ empty cells finds nothing; you see it only by working out how many readings
 
 **3. A sensor in the wrong units, on the wrong clock.** Sensor 7's temperature was
 Fahrenheit, not Celsius, and its clock was two hours out. Neither is visible in the
-values — they look entirely plausible. Fahrenheit shows up only because its
-readings jitter 1.8× faster than the others; the clock only by comparing its
-daylight pattern against the other seven.
+values. Fahrenheit shows up only because its readings jitter 1.8× faster than the
+others; the clock only by comparing its daylight pattern against the other seven.
 
 **4. One join is safe, the next is not.** Plant IDs repeat: one ID covers more
-than one sensor. Joining the sensor table is fine. Joining the notes or photos to
-it silently multiplies rows — 49 become 67. The trap: the first join works, so
-the next one looks safe too.
+than one sensor. Joining the sensor table is fine; joining the notes or photos to
+it silently multiplies rows — 49 become 67. The trap: the first join works, so the
+next looks safe too.
 
 **5. Two pots have two sensors each, and the pairs disagree.** Probes in one pot
 share the same soil, so their readings should rise and fall together. They do not.
@@ -61,24 +60,31 @@ and throws away the disagreement — which is the only reason to fit two probes.
 
 ## Where I was wrong
 
-A second review found three real defects *after* I had reported them working. All
+A second review found four real defects *after* I had reported them working. All
 are fixed, each with a test that fails if the fix is undone:
 
 - **The publishing gate could not fail.** It asked "is any value missing?", which
   any missing value satisfies. I restored 1,344 known-bad readings; it passed them.
-- **A counting error made a dead sensor look intermittent.** A 431-reading fault
-  was reported as eleven separate glitches. It is one continuous fault — a *better*
-  finding once corrected.
-- **Three numbers in my findings were not produced by any code.** I had carried
-  them over from earlier exploring. They are now computed, and two changed.
+- **A counting error treated the start of each sustained excursion as an isolated
+  sample.** The corrected result is 11 runs holding all 431 out-of-spec readings,
+  with zero isolated. The cause of that sensor's behaviour is still unresolved.
+- **A falling reading counted as agreement.** The test asked whether fertiliser
+  raised conductivity; a large *drop* scored as support. It now requires a rise.
+- **A photo taken before an event counted as a response to it.** The window was
+  symmetric; it now looks only forward, and "no photo after the event" is its own
+  answer rather than a silent zero.
 
-The pattern each time: I checked by re-reading my own writing, not by re-running.
+Several findings also carried numbers no code produced; those now come from
+detectors, and two changed. The pattern each time: I checked by re-reading my own
+writing, not by re-running.
 
 ## What I would do next
 
 1. **Put the checks in the build** — every new check gets a test that fails without it.
-2. **Move the settings into data.** Soil type, sensor model and plant are code
-   today; as data, a new soil type is a one-line change, not a release.
+2. **Move the device settings into an effective-dated registry.** Unit fixes,
+   clock offsets and sensor specifications are code today; plant, soil type and
+   species are already data. Making the rest data means a new sensor family is a
+   row, not a release.
 3. **Settle the two-sensor question** — it decides how the modelling table is built.
 4. **Version each derived value.** The moisture figure comes from a soil-type
    curve, and that curve has no version and no date.

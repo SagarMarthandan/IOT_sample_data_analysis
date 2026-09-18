@@ -363,7 +363,7 @@ def main() -> None:
 
     legs = (f"{int(tri['sensor_leg'].eq('rises').sum())} with an EC rise, "
             f"{int(tri['model_leg'].eq('responds').sum())} with a model response, "
-            f"{int(tri['model_leg'].eq('no image').sum())} with no photo in window")
+            f"{int(tri['model_leg'].eq('no post-event image').sum())} with no photo after the event")
     print(f"""
   {len(tri)} fertilising logs: {legs}.
 
