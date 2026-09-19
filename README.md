@@ -39,10 +39,12 @@ submission/
     signals.py              Tasks 8, 9 — a derived signal, log text
   fyta_pipeline.py        entry point + printed narrative
   fyta_analysis.ipynb     the same results, rendered
-  test_gates.py           regression checks for the four corrected defects
+  test_gates.py           regression checks; each one fails if its fix is reverted
+  images/                 hand-made architecture diagrams the notebook embeds
+                                  — NOT under out/, which is regenerated
   WRITEUP.md / .pdf       the one-page submission note
   md_to_pdf.py            builds the PDF: markdown -> HTML -> headless Chrome
-  out/                    published artefacts and the run log
+  out/                    published artefacts and the run log (all regenerated)
 ```
 
 ## Outputs
@@ -50,6 +52,12 @@ submission/
 `submission/out/`: `cleaned_sensor.csv`, `qc_rejections.csv`,
 `images_flattened.csv`, `plant_features.csv`, one CSV per analysis section,
 `figures/`, and `run.log`.
+
+**Everything under `out/` is regenerable — delete it and re-run.** That makes it
+the wrong home for anything the code does not write itself: a hand-made asset kept
+there dies on the next `rm -rf out`, and nothing reports it. The architecture
+diagrams the notebook embeds live in `submission/images/` for exactly that reason,
+and `test_gates.py` fails if any image the notebook references is missing.
 
 Two time columns, and the difference matters. `timestamp` is the **source text as
 delivered** — mixed format on purpose, because SENS-07 writes DD/MM while the

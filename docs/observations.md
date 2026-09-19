@@ -295,10 +295,17 @@ So the real choice is not "values vs nulls". It is:
 | **Sparse** — shipped | 1823 | only what the device reported |
 | **Dense grid** | 2016 | 1823 real + **193 timestamps no instrument measured** |
 
-The dense version manufactures a row at a time nothing was measured. `AGENTS.md`
-§6 forbids exactly that. The device did not *miss a reading* — it was **offline**,
-and an absent row plus a `gap_minutes` flag says that; a NULL row says something
-different and false.
+**The dense version is not dishonest, and this entry originally said it was.** A
+row carrying an expected timestamp, NULL measurements and `reading_received =
+false` asserts *"a reading was owed here and is unknown"* — it does not claim an
+instrument measured anything. Sparseness and density are both honest; they differ
+in what downstream code has to handle. **This is a downstream-use decision, not an
+integrity one**, and the first version of this answer collapsed the two.
+
+The sparse table is still the right choice here — a consumer doing a moving average
+would otherwise carry a fabricated value across 48 hours unless every query
+remembered to test the flag, and `gap_minutes` puts that burden in one column
+instead of every consumer. That is a reason, not a rule.
 
 The reconciliation is exact, which is the check that the sparse grain is honest:
 
@@ -998,3 +1005,71 @@ the files, because finding it needs the app's configuration history.
 **D11.** Task 5 (the per-plant table) cannot be built for UP-1001 and UP-1003
 until it is answered. Averaging two unrelated series produces a number that
 describes neither pot — and averaging is exactly what would hide F3.
+
+---
+
+## The third review — the one that found the wrong claims
+
+A frontier model reviewed the repository cold (`second_opinion_astra.md`) and scored
+it 7/10 — *"interview-worthy, with reservations"*. **Every one of its 18 checkable
+claims reproduced.** This was not a style critique; it found wrong arithmetic and
+a rule file propagating it.
+
+### The defects, and what verified them
+
+| Claim | Verified by |
+|:---|:---|
+| Frozen detector nulls legitimate dark light | 52 night zeros → all nulled |
+| Conflicting duplicates silently discarded | `grain_violations` found it; `clean()` dropped one |
+| Healthy input *fails* the audit | `0 rejections recorded` → gate FAILS |
+| Expected slots derived from observed endpoints | deleting a day still reported 100 % |
+| ISO-only input fails parsing | `assert first.max() > 12` on an empty slice |
+| An unmapped device vanishes | 5 plants, 2,016 readings gone, no error |
+| `triangulate` reads probe 1 only | probe-2-only rise → `"no rise"` |
+| `NaN` reported as `"no rise"` | missing baseline → negative |
+| 105 drydown rows stale vs current VWC | 45/48/12 — exact |
+| Notebook "65–107 … keep it" vs code nulling >100 | 49 sources, 0 retained |
+| Notebook "F4 flagged in `qc_flags`" | 702 of 1,056 drifting rows unflagged |
+| "FYTA is already using S3" | synthetic fixture paths |
+| Script prints "wrote run.log" without writing one | shell redirection, not the script |
+
+### The claims that were simply wrong
+
+Three of these were mine, stated confidently, in docstrings and in the graded
+write-up:
+
+**Differentiation does not escape calibration.** I wrote that a drying *rate*
+"carries across the fleet without a calibration". For `reported = a·true + b`:
+
+```
+d(reported)/dt = a · d(true)/dt
+```
+
+The offset `b` dies; the gain `a` survives — and the gain is precisely what the
+substrate curve changes. Arithmetic, not opinion.
+
+**The shared-environment claim was backwards.** The docstring said fleet-deviation
+on ambient channels is "meaningless, because every device carries the same series".
+A tight shared signal makes the fleet a *better* reference, not a worse one — and
+`sensors.py` used exactly that method to find SENS-07's clock and unit faults while
+the docstring called it meaningless.
+
+**A NULL expected slot is not a fabricated measurement.** See the correction above.
+
+### The lesson that is about method, not data
+
+> *"The rule file repeats some of these claims. A repository instruction is not
+> scientific evidence; encoding an assumption as a rule makes it easier for later AI
+> work to repeat it, not more likely to be true."*
+
+That is the failure mode, named exactly. `AGENTS.md` said two same-pot probes "must
+still be positively correlated" — an assumption written as a rule. It propagated
+into the write-up, into F10/F11, and into the answer I gave the owner about the
+dense grid. **The rule was the vector.** It now carries a preamble saying it records
+decisions rather than evidence, and the specific claims have been amended.
+
+**Why it took three reviews.** The first two audits asked "does the code do what it
+says?" and "does the number compute?" — both passed, repeatedly. This one asked
+**"does the header describe what is computed?"** and **"is the stated reason
+actually true?"** Those are different questions, and no amount of re-running the
+same checks reaches them.

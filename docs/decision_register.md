@@ -31,6 +31,8 @@ taken with the wrong premise is a re-run, not a patch.
 | **D13** | Eight dark-hour light readings are **kept**, not deleted | A lamp at 01:00 is physically possible | Firmware | Deleting a real observation |
 | **D14** | The image model's r = 0.75 is **unestablished**, not circular | The dataset is synthetic; one generator may emit both | Vendor | Over- or under-trusting the image heads |
 | **D15** | The 1:1 phrase→type mapping is a **generation signature**, not a tick | 49 rows, zero ambiguous phrases | Product | Misreading a constraint as a quality signal |
+| **D16** | Audit-then-publish is a stated limit, not an atomic swap | Timeboxed; the audit does run before any write | Platform | A reader can see a partial output set |
+| **D17** | Two probes are kept separate, and the modelling table shape depends on D11 | Inter-probe r = −0.076 / +0.140 | Product | The fusion rule decides what a model receives |
 
 ---
 
@@ -353,6 +355,44 @@ F11 exposed.
 `log_type` column is redundant with `text`. That is worth knowing, not damaging.
 
 **Ask:** does the app present a fixed list of log phrases, or a free-text field?
+
+---
+
+## D16 · The pipeline is audit-then-publish, not an atomic swap
+
+**Choice.** `clean()` audits the frame in memory and the frame is then written
+straight to consumer paths. There is no staging table and no atomic publish.
+
+**Rests on.** Nothing — this is a stated limit, not a decision. The audit runs
+before any write, so nothing unvetted is written, but a reader can observe a
+partial output set if the process dies mid-write. The gate also uses Python
+`assert`, which is removed under `-O`.
+
+**If wrong.** A consumer reading during a write can see half a batch. At this size
+the window is milliseconds and the whole run is seconds; at scale it is a real
+exposure.
+
+**Ask:** is there a deployment convention to follow — staged-then-promoted on the
+same volume, or does the platform provide it?
+
+---
+
+## D17 · The two-sensor question decides the modelling table's shape
+
+**Choice.** Both probes are kept side by side, never fused, and the disagreement is
+the deciding evidence.
+
+**Rests on.** Inter-probe correlation of −0.076 (UP-1001) and +0.140 (UP-1003), and
+the fact that SENS-06's probe is independently known to be faulty. Depth,
+placement, lagged infiltration and a wrong mapping all produce this pattern.
+
+**If wrong.** If the mapping is simply a bug, the correct fix is to repair the
+dimension and the plants resolve into two ordinary single-probe plants. If it is a
+real configuration, the modelling table needs an explicit fusion rule that this
+work does not propose, because what the rule should be depends on intent.
+
+**Ask:** D11 — but sharpened. It is not only "is it allowed", it is "what should a
+feature table DO about it", and the answer changes what ships.
 
 ---
 

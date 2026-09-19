@@ -39,6 +39,11 @@ SPEC = {
 
 FROZEN_MIN_RUN = 48                                       # F3, 12 hours
 
+#: Values a channel may hold unchanged for hours without being faulty. An
+#: unchanged reading is only evidence of a dead sensor if the channel COULD have
+#: moved, and PAR sits at exactly zero from dusk to dawn.
+LEGITIMATE_PLATEAU = {"light_par": 0.0}
+
 
 # Per-device defects found in Task 2, declared rather than sniffed at runtime.
 # A new device with the same fault is a change to these tables, not to the code.
@@ -52,13 +57,25 @@ UNIT_FIXES = {"SENS-07": {"soil_temp_c": "fahrenheit"}}   # F1
 # the device is not specified to be accurate there, which is not the same as
 # the reading being wrong. Nulling SENS-04's peaks would delete the sawtooth.
 #
-# Two of these bounds are DEFINITIONAL -- arithmetic, not judgement. The other
-# three are physics judgements, and deliberately WIDE: a bound set too narrow
-# nulls real data (destructive, unrecoverable), while one set too wide merely
-# leaves junk flagged (visible, reversible). The impossible ceiling therefore
-# sits 1.25x-12x above the specified one. They are deliberately NOT derived from
-# the data -- a quantile or 3-sigma cut would move with the data, so a
-# fleet-wide fault would shift the bound and hide inside it.
+# The name `IMPOSSIBLE` is shorthand, and it flattens three different kinds of
+# claim. Only the first is physics:
+#
+#   physical bound     definitional, arithmetic -- a volume fraction cannot
+#                      exceed 100 %, relative humidity cannot exceed 100 %
+#   specification      what the vendor warrants (SPEC above)
+#   plausibility       a judgement about THIS deployment. Soil above 70 C in a
+#                      potted plant is not physically impossible -- it is a
+#                      policy, and a pot in an oven would beat it. Nothing here
+#                      would break the laws of thermodynamics; it would break
+#                      the assumption that the probe is in soil.
+#
+# So read the three judgement bounds below as POLICY, not as constants. They are
+# deliberately WIDE, and they are the ones to revisit when D1 is answered: a
+# bound set too narrow nulls real data (destructive, unrecoverable), while one
+# set too wide merely leaves junk flagged (visible, reversible). The ceiling
+# therefore sits 1.25x-12x above the specified one. They are deliberately NOT
+# derived from the data -- a quantile or 3-sigma cut would move with the data,
+# so a fleet-wide fault would shift the bound and hide inside it.
 IMPOSSIBLE = {
     "soil_moisture_vwc": (0, 100),      # definitional: a volume fraction
     "soil_temp_c": (-30, 70),           # potted soil. Below -30 it is frozen

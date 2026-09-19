@@ -144,6 +144,30 @@ S3, raw 18 GB/mo                                                  $0.41/mo
 S3, compressed ~4 GB/mo                                           $0.09/mo
 ```
 
+**The line that decides this estimate is PUT requests, and the first draft of it
+was missing.** AWS's S3 rule action writes an MQTT message into an object; it does
+not batch. So the object count is a design decision, not a detail:
+
+```
+one object per message     288,000,000 ÷ 1,000 × $0.005 = $1,440/mo   ← exceeds the estimate
+one object per device/hour  72,000,000 ÷ 1,000 × $0.005 = $  360/mo
+one object per device/day    3,000,000 ÷ 1,000 × $0.005 = $   15/mo
+```
+
+At one object per reading, **request cost alone is 3× the whole storage estimate
+and larger than the $200–500 envelope** — before reads, transforms or serving. A
+static object key overwrites data instead of accumulating it, so "just use one
+key" is not a fix either.
+
+**So batching is a requirement, not an optimisation.** Buffer at the gateway or
+in an ingestion buffer and land one compacted Parquet object per device per hour
+at most. The written object should be Parquet, not the raw message: a bucket of
+288 M tiny JSON objects is a listing-and-scan problem long before it is a cost
+problem.
+
+Sources: [AWS IoT S3 rule action](https://docs.aws.amazon.com/iot/latest/developerguide/s3-rule-action.html) ·
+[S3 pricing](https://aws.amazon.com/s3/pricing/).
+
 **The pipeline is not the cost driver — the connection model is.** Keeping 100k
 devices connected 24/7 costs $346/month; connecting only to send costs $86. And a
 BLE sensor relayed by a phone may never hold an IoT Core connection at all.
@@ -154,10 +178,12 @@ If readings only need to reach a dashboard in **minutes, not seconds**, skip the
 stream tier entirely:
 
 ```
-IoT Core rule → S3 (event-date partition) → batch validation on the new partition
+IoT Core rule → ingestion buffer (batches + compacts) → S3 Parquet → validation
 ```
 
-At 0.6 GB/day that is a few seconds of DuckDB. A broker earns its place when
+**The buffer is not optional here** — it is what turns 288 M objects into 3 M (see
+the PUT line above, $1,440/mo versus $15/mo). At 0.6 GB/day that is a few seconds
+of DuckDB. A broker earns its place when
 something must react *per message* — live alerting, or a device command. Until
 then it is a system to operate for no benefit. **Start here; add Kinesis when a
 requirement actually needs it.**

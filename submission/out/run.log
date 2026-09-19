@@ -246,7 +246,7 @@ F6  SENS-08 emits single-sample values that cannot be explained   [SENS-08]
 F7  SENS-05 missing 193 slots (48.5h)   [SENS-05]
     detected : coverage ledger against the expected 15-min grid
     severity : medium  class: data problem - availability
-    next     : leave the gap; the ~320-reading buffer means it was recoverable, so this was a sync failure not lost data - confirm with firmware
+    next     : leave the gap. The ~320-reading buffer makes 193 slots stay WITHIN capacity, so recovery was possible -- an upper bound, not evidence the readings survived. Whether they did needs transport telemetry, not arithmetic. Reported as absence; cause unresolved
 
 F8  SENS-08 has 15 superfluous duplicate rows   [SENS-08]
     detected : identical payloads, 0 conflicting
@@ -369,24 +369,26 @@ impossible          71
   air_humidity_pct   raw [   27.50,   131.00]   clean [   27.50,    87.90]   nulls 10
 
 -- audit gate (nothing publishes unless every check passes)
-                                                   check  passed                                              detail
-                                no duplicate keys remain    True                                          15 dropped
-            soil_moisture_vwc: no impossible values left    True                                            0 remain
-                  soil_temp_c: no impossible values left    True                                            0 remain
-                     ec_us_cm: no impossible values left    True                                            0 remain
-                    light_par: no impossible values left    True                                            0 remain
-             air_humidity_pct: no impossible values left    True                                            0 remain
-                                   raw columns untouched    True                 all 5 raw channels match the source
-             every rejection is null in its clean column    True             0 of 1415 rejections still hold a value
-                    every null has a rejection behind it    True                                   unexplained: none
-soil_moisture_vwc: outside_spec flags match the detector    True 382 detected -- 0 unflagged, 0 flagged but in range
-         ec_us_cm: outside_spec flags match the detector    True 354 detected -- 0 unflagged, 0 flagged but in range
- air_humidity_pct: outside_spec flags match the detector    True   0 detected -- 0 unflagged, 0 flagged but in range
-        light_par: outside_spec flags match the detector    True   0 detected -- 0 unflagged, 0 flagged but in range
-   every dark-hour spike is flagged, and nothing else is    True                               8 detected, 8 flagged
-                            every rejection has a reason    True                            1415 rejections recorded
-                    detected unit outliers are all fixed    True             detected ['SENS-07'], fixed ['SENS-07']
-                   declared unit fixes were all detected    True             fixed ['SENS-07'], detected ['SENS-07']
+                                                        check  passed                                                                              detail
+                                     no duplicate keys remain    True                                           15 row(s) left the frame; 30 shared a key
+                 soil_moisture_vwc: no impossible values left    True                                                                            0 remain
+                       soil_temp_c: no impossible values left    True                                                                            0 remain
+                          ec_us_cm: no impossible values left    True                                                                            0 remain
+                         light_par: no impossible values left    True                                                                            0 remain
+                  air_humidity_pct: no impossible values left    True                                                                            0 remain
+                                        raw columns untouched    True                           all 5 raw channels match the source on 15,935 shared keys
+                  every rejection is null in its clean column    True                                             0 of 1415 rejections still hold a value
+                         every null has a rejection behind it    True                                                                   unexplained: none
+     soil_moisture_vwc: outside_spec flags match the detector    True                                 382 detected -- 0 unflagged, 0 flagged but in range
+              ec_us_cm: outside_spec flags match the detector    True                                 354 detected -- 0 unflagged, 0 flagged but in range
+      air_humidity_pct: outside_spec flags match the detector    True                                   0 detected -- 0 unflagged, 0 flagged but in range
+             light_par: outside_spec flags match the detector    True                                   0 detected -- 0 unflagged, 0 flagged but in range
+        every dark-hour spike is flagged, and nothing else is    True                                                               8 detected, 8 flagged
+                                 every rejection has a reason    True                                                            1415 rejections recorded
+                         detected unit outliers are all fixed    True                                             detected ['SENS-07'], fixed ['SENS-07']
+                SENS-07: soil_temp_c conversion is arithmetic    True                                                        re-derived from raw, matches
+conflicting duplicates are quarantined, not silently resolved    True                                            0 conflicting rows in raw, 0 quarantined
+                        declared unit fixes were all detected    True declared ['SENS-07'] of the 1 declared, present in this batch; detected ['SENS-07']
 
   published: cleaned_sensor.csv (15935 rows), qc_rejections.csv (1415 rows)
 
@@ -544,12 +546,20 @@ UP-1006       Pothos                  2016        0       1          0.994      
 ==============================================================================
 6a. TRIANGULATION - can three sources confirm a fertilising event?
 ==============================================================================
-      log   plant  fertilised   d_ec  noise_sd  d_ec_sigma       image  hours_off  nutrient_def sensor_leg           model_leg
-LOG-00001 UP-1001 06-03 14:00  3.198    57.245        0.06 06-04 16:30       26.5         0.050    no rise              silent
-LOG-00009 UP-1002 06-01 20:00  3.974    58.114        0.07         NaN        NaN           NaN    no rise no post-event image
-LOG-00020 UP-1003 06-12 10:00  0.604    58.493        0.01 06-14 10:00       48.0         0.033    no rise              silent
-LOG-00024 UP-1003 06-19 10:00 -3.115    58.493       -0.05 06-20 13:00       27.0         0.002    no rise              silent
-LOG-00037 UP-1005 06-13 20:00 -6.010    57.024       -0.11         NaN        NaN           NaN    no rise no post-event image
+      log   plant  fertilised  d_ec_sigma probe_leg       image  hours_off  nutrient_def sensor_leg           model_leg
+LOG-00001 UP-1001 06-03 14:00        0.06   SENS-01 06-04 16:30       26.5        0.0502    no rise              silent
+LOG-00009 UP-1002 06-01 20:00        0.07   SENS-03         NaN        NaN           NaN    no rise no post-event image
+LOG-00020 UP-1003 06-12 10:00        0.01   SENS-04 06-14 10:00       48.0        0.0332    no rise              silent
+LOG-00024 UP-1003 06-19 10:00       -0.02   SENS-06 06-20 13:00       27.0        0.0020    no rise              silent
+LOG-00037 UP-1005 06-13 20:00       -0.11   SENS-07         NaN        NaN           NaN    no rise no post-event image
+
+  sigma is per probe and the leg reads EVERY probe the plant owns; `probe_leg` names the one that moved most.
+  `not testable` means a window had no baseline or no response, which is not a failed test.
+    LOG-00001  SENS-01 +0.06, SENS-02 -0.09
+    LOG-00009  SENS-03 +0.07
+    LOG-00020  SENS-04 +0.01, SENS-06 -0.00
+    LOG-00024  SENS-04 -0.05, SENS-06 -0.02
+    LOG-00037  SENS-07 -0.11
 
   5 fertilising logs: 0 with an EC rise, 0 with a model response, 2 with no photo after the event.
 

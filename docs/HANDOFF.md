@@ -43,12 +43,16 @@ FYTA Assessment/
 **Verified at this boundary:**
 
 ```
-uv run fyta_pipeline.py    exit 0 · no warnings · 617 log lines
-uv run test_gates.py       4 of 4 regression checks pass
+uv run fyta_pipeline.py    exit 0 · writes out/run.log itself · 634 lines
+uv run test_gates.py       11 of 11 regression checks pass
+                           each verified to FAIL when its fix is reverted
 fyta_analysis.ipynb        52 cells · 0 errors · 2 figures
-WRITEUP.pdf                1 page, A4
+WRITEUP.pdf                1 page, A4 · 783 words
 data/                      unmodified — md5 df7b5d41cd79…
 ```
+
+**Three external reviews have run.** The third (`second_opinion_astra.md`) found
+ten defects and three wrong claims; all are fixed and every fix has a test.
 
 Environment: Python 3.12.12, pandas 2.3.3, numpy 2.4.6 (**pinned `<2.5`** — 2.5
 deprecates a generic timedelta unit pandas 2.3.3 still uses), matplotlib 3.11.2.
@@ -135,6 +139,8 @@ it depend on its own history, and a stale copy would go unnoticed.
 | **D11** | **Does the app allow two sensors on one plant?** | **Product** |
 | D12 | Does a soil-temperature spec exist? | Hardware |
 | D13 | Can a light at that pot be real? | Firmware |
+| **D16** | Is there a staged-publish convention to follow? | Platform |
+| **D17** | What should a feature table DO about two probes? (sharpens D11) | Product |
 
 **Plus two raised by this work, neither in the register yet:**
 
@@ -180,17 +186,44 @@ reproduced before being fixed.
 | Rewrote Task 2's evidence section when Task 4 was asked for | Reverted. **Fourth** time an adjacent-but-unrequested change was made |
 | nbconvert aborting on an error **without writing**, leaving the previous run's outputs | Looks like `0 errors`. Has happened **three times**; only caught by reading the outputs |
 
-**The pattern:** the audit, the pomytail review, and *running the code* each
-caught what reading did not. Claims are cheap; a mutation that fails is not.
+**From the third review (Astra) — all 18 checkable claims reproduced:**
+
+| Believed | Reality | Caught by |
+|:---|:---|:---|
+| The frozen rule was safe fleet-wide | It nulls **any** long unchanged run, including legitimate darkness — 52 night light readings | Fixture |
+| Duplicates were deduped losslessly | Identical ones were; **conflicting** ones were dropped to an arbitrary winner | Fixture |
+| The audit passed on healthy input | `len(rejections) > 0` was required, so clean batches **failed** | Fixture |
+| "detected unit outliers are all fixed" | Membership, not arithmetic — every SENS-07 temp replaced with 25 °C passed | Mutation |
+| `triangulate` tested the plant | It read `ec_1` / `device_1` — **probe 1 only** | Fixture |
+| Untestable windows | `NaN` was reported as `"no rise"` — absent evidence as negative evidence | Fixture |
+| A rate escapes the substrate calibration | **`d(ax+b)/dt = a·dx/dt`.** The gain survives; that was simply wrong | Arithmetic |
+| High cross-device r makes fleet checks meaningless | Backwards — a tight shared signal is a *better* reference. And the code used it anyway | Reading |
+| A NULL expected slot is fabricated data | It is not. Sparse and dense are both honest; it is a downstream choice | Reading |
+| "FYTA is already using S3" | Synthetic fixture paths | Reading |
+| The script wrote `run.log` | It printed a claim; the shell redirect wrote the file | Reading |
+| Notebook: "65–107 … keep it" | The code nulls above **100** | Reading |
+| Notebook: "F4 flagged in `qc_flags`" | 702 of 1,056 drifting rows carry no flag | Reading |
+
+**The root cause of most of these was `AGENTS.md` itself**, which stated
+assumptions as rules — "two probes must be positively correlated" propagated into
+the code, the write-up, and an answer given to the owner. The file now opens by
+saying it records decisions rather than evidence, and the specific claims are
+amended.
+
+**The pattern:** the audits, the ponytail review, and *running the code* each
+caught what reading did not. But the third review asked questions the first two
+never did — **"does the header describe what is computed?"** and **"is the stated
+reason true?"** No amount of re-running the same checks reaches those.
 
 ## 7. Next actions
 
-1. **Commit.** The working tree has uncommitted changes and the last `git checkout`
-   cost two pieces of work. Commit before any further experiment.
-2. **Ship.** Everything else is done. Run kuchiku when ready.
+1. **Review the diff, then commit.** The working tree holds every fix from the
+   third review and is **deliberately uncommitted** — the owner asked to see the
+   changes first. Nothing else is pending.
+2. **Ship.** Run kuchiku when the review is done.
 3. **After the deadline**, if the repo becomes a portfolio piece: decide whether
-   `docs/assessment.md` (Gregor's full email thread) and `docs/second_opinion.md`
-   should stay in it.
+   `docs/assessment.md` (Gregor's full email thread) and the three
+   `second_opinion*.md` files should stay in it.
 
 ## 8. Unrecoverable if lost
 

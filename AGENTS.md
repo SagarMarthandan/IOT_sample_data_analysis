@@ -9,6 +9,18 @@ one that crashes, because nobody investigates a pipeline that works.
 Sources are listed at the end. Where a rule is derived from a published
 standard or framework, the rule says so, so you can go and check it.
 
+> **This file is not evidence.** It records *decisions*, and decisions can be
+> wrong. Every claim in it about the domain, the hardware, or what the data
+> "must" do is a hypothesis someone wrote down — including the ones stated most
+> confidently. A rule that has been repeated across several documents is not
+> more true than one that appears once; it is only harder to notice when it is
+> wrong.
+>
+> Treat an encoded assumption as a claim to test, not a fact to apply. When the
+> data contradicts this file, **the data wins and this file gets amended** —
+> with the correction recorded, the way §17 requires of every other finding.
+> Several rules below have already been corrected this way.
+
 ---
 
 ## TL;DR — the seven rules most often broken
@@ -46,7 +58,7 @@ Consequences that govern everything downstream:
 | VWC is a *derived* value from a dielectric reading | `soil_moisture_vwc` is only comparable across plants when the substrate conversion is comparable. Absolute thresholds are wrong across substrates. |
 | Substrate is a **calibration parameter**, not a label | A wrong or stale substrate label means the number was produced by the wrong curve. That is a magnitude error, not a cosmetic one. |
 | Probes sit in the **lower third** of the pot | It is a *point* reading near the bottom where water collects — not a pot average. Do not read it as "the plant's water". |
-| Probes are modular, **3–35 cm** | Two sensors in one pot need not be at the same depth. They must still be *positively correlated* — they share one water reservoir. |
+| Probes are modular, **3–35 cm** | Two sensors in one pot need not be at the same depth, so they need not agree. Depth, horizontal placement, lagged infiltration, drainage, root uptake, per-probe calibration and a **failed probe** can each change the relationship. Disagreement makes *unqualified averaging* unsafe and is evidence worth investigating — it does not by itself prove a mapping error. |
 | Device reports **1×/hr typical, up to 4×/hr** | 15-minute data is at the sensor's maximum rate. Absence is meaningful. |
 | Offline buffer ≈ **320 measurements** | At 4×/hr that is ~80 hours. Longer outages lose data permanently — not a recoverable gap. |
 | G2 **self-calibration** causes shifts for up to **48 h** after | A step change may be a legitimate calibration, not a fault. Rule it out before calling it one. |
@@ -62,7 +74,19 @@ Published specification (verify against the actual device generation in use):
 | Ambient temperature | −5 … 50 °C |
 
 **A reading outside the manufacturer's specified range is not an outlier — it is
-evidence that the instrument failed or the conversion is wrong.** Those are
+evidence that the instrument failed or the conversion is wrong.**
+
+Keep three things apart, because they are not the same claim and only one is
+derived from physics:
+
+| | What it is | Example |
+|---|---|---|
+| **Physical bound** | Definitional, arithmetic | A volume fraction cannot exceed 100 % |
+| **Specification range** | What the vendor warrants | VWC 0–65 % |
+| **Plausibility policy** | A judgement about *this* deployment | Soil above 70 °C in a potted plant |
+
+The third is a policy, not a law. Name it as one, so the next person can change
+it without having to disprove a physical constant. Those are
 different conclusions with different fixes, and only the domain can tell you which.
 
 ### Prove it or flag it
@@ -97,6 +121,13 @@ Never write unvetted data where a consumer can read it.
 2. **Audit** — schema, volume, nulls, keys, ranges, distribution.
 3. **Publish** atomically, and only if every gate passed.
 
+   Be precise about which of these the implementation actually does. Auditing a
+   frame in memory and then writing files directly to consumer paths is
+   **audit-then-publish, not an atomic swap** — a reader can see a partial set.
+   That is a legitimate timeboxed limit; claiming more is not. Python `assert`
+   also disappears under `-O`, so a gate built on it is a gate that can be
+   optimised away.
+
 On failure: halt, alert, route the offending rows to a **quarantine table with
 the reason attached**. Do not drop silently. Do not promote partially.
 
@@ -107,8 +138,12 @@ a row multiplier, and the resulting wrong numbers look completely plausible.
 
 When duplicates exist, **separate redundant copies from conflicting ones**.
 Identical payloads are an at-least-once redelivery and dedupe losslessly.
-Rows that disagree on the same key are unorderable — keep both, flag both, and
-never resolve them by arbitrarily keeping one.
+Rows that disagree on the same key are unorderable — keep **both**, flag both,
+and never resolve them by arbitrarily keeping one. In practice that means
+**quarantine**: route both payloads to the ledger with the reason attached and
+keep them out of the published frame, because two rows on one key turn every
+downstream `LEFT JOIN` into a fan-out. Quarantining preserves both; it does not
+choose. Identical payloads are the only case where deduping is lossless.
 
 ### 5. Parse strictly; never coerce
 Match input against an explicit registry of known formats and **fail loudly on
@@ -124,6 +159,14 @@ anything unrecognised**, naming the offending rows.
 - `NULL` means unknown.
 - **Never clip** an out-of-range value to the boundary — that manufactures a
   measurement that was never taken. Null it, and keep the fact that it failed.
+- **A row is not a measurement.** These are different, and only two are honest:
+  a row for an expected-but-absent slot carrying NULL measurements and an
+  explicit `received = false` *asserts that a reading was owed and is unknown* —
+  it does not invent an instrument. A row carrying an *interpolated* value
+  claims a reading that was never taken. And a sparse table with the gap flagged
+  is equally honest. Sparse-versus-dense is a **downstream-use decision, not an
+  integrity one** — say which you chose and why. What is never allowed is a
+  filled value with no label, or a gap nobody records.
 - **Never average away** an anomaly.
 - Any imputation is a **new column** (`x_filled`, `x_interpolated`) with the
   method recorded. The original column keeps its holes.
@@ -172,9 +215,15 @@ that matter disproportionately for fleets:
 - **Completeness against a slot grid.** Build the grid each device *should* have
   produced and account for every slot as present, missing, or surplus. Row counts
   hide a device that is half-present.
-- **Frozen-channel detection.** Zero variance over a rolling window, while the
-  same device's *other* channels keep moving, is a dead sensor — not a plateau.
-  The cross-channel comparison is what distinguishes them.
+- **Frozen-channel detection, and it must be channel-aware.** An unchanged
+  value is evidence of a dead sensor only if the channel **could** have moved.
+  Zero variance over a rolling window is a fault *unless the channel legitimately
+  rests there* — PAR sits at exactly 0 from dusk to dawn, so a run of night
+  zeros is a dark pot, not a fault. Cross-channel corroboration is **not
+  sufficient on its own**: temperature and humidity keep moving all night while
+  light is honestly constant. So the rule needs two parts — the value is not at
+  the channel's legitimate floor, **and** the other channels keep moving. Get
+  this wrong in the destructive direction and you null real data.
 
 Alerts must be actionable and must not flap: require a condition to persist, and
 use distinct thresholds for raising and clearing.

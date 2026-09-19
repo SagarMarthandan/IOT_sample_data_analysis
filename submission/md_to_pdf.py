@@ -22,10 +22,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 h1 { font-size: 17pt; margin: 0 0 1mm; letter-spacing: -0.2pt; }
-h2 { font-size: 11.6pt; margin: 3.4mm 0 1.5mm; padding-bottom: 1mm;
+h2 { font-size: 11.2pt; margin: 2.4mm 0 1.2mm; padding-bottom: 0.7mm;
      border-bottom: 1px solid #dcdfe4; }
 h3 { font-size: 10pt; margin: 4mm 0 1.5mm; }
-p { margin: 0 0 1.9mm; }
+p { margin: 0 0 1.6mm; }
 hr { border: none; border-top: 1px solid #e4e7ec; margin: 3mm 0; }
 table { border-collapse: collapse; width: 100%; margin: 2mm 0 3mm;
         font-size: 9.0pt; page-break-inside: avoid; }
@@ -36,8 +36,8 @@ td:first-child { white-space: nowrap; }
 code { font-family: "Latin Modern Mono Light", "LM Mono 10", monospace;
        font-size: 9.0pt; background: #f4f5f7; padding: 0 0.7mm;
        border-radius: 2px; }
-ul { margin: 1mm 0 3mm; padding-left: 4.5mm; }
-li { margin-bottom: 1.1mm; }
+ul { margin: 0.8mm 0 2.4mm; padding-left: 4.5mm; }
+li { margin-bottom: 0.9mm; }
 strong { font-weight: 600; }
 a { color: inherit; text-decoration: none; }
 """

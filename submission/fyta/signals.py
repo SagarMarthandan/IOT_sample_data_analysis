@@ -17,16 +17,31 @@ def drydown_rate(sensor: pd.DataFrame, window: int = 96,
                  min_periods: int = 48) -> pd.DataFrame:
     """%VWC lost per day, from the trailing median of consecutive changes.
 
-    THE RATE IS COMPARABLE WHERE THE LEVEL IS NOT. An absolute VWC threshold is
-    wrong across substrates -- that is precisely what the conversion curve exists
-    for, and precisely what is unresolved here (F13, D7). But "this pot loses
-    2 %/day" means the same thing in coir as in bark, so the rate carries across
-    the fleet without a calibration nobody has confirmed yet.
+    A RATE DOES NOT BYPASS CALIBRATION. An earlier version of this docstring
+    claimed "this pot loses 2 %/day" carries across substrates because
+    differentiation removes the offset. That is wrong, and it is arithmetic, not
+    opinion: if the substrate curve is `reported = a * true + b`, then
+
+        d(reported)/dt = a * d(true)/dt
+
+    Differentiation kills `b` and keeps `a`. The gain is exactly what differs
+    between coir and bark -- and for the logistic curves FYTA describes it is not
+    even constant, so the derivative moves with the local slope. A rate is
+    therefore comparable **within one probe under stable conditions**, which is
+    what it is for. Across substrates it inherits the same unresolved calibration
+    the level does (F13, D7).
 
     MEDIAN, not mean. A watering event is a large jump in the other direction,
     and a handful of them would swamp a mean. The median ignores them by
     construction, so the signal stays a drying rate rather than an average of
     drying and watering.
+
+    FRESHNESS IS NOT IMPLIED. The window counts trailing readings, so a rate can
+    be emitted while the CURRENT value is NULL -- 105 rows in this sample, on
+    SENS-04/06/08. That is deliberate (a gap still has a prior drying trend) but
+    it means the column is an estimate as of the last valid reading, not a
+    measurement now. Compare it against the device's latest timestamp before
+    using it.
 
     window=96 readings is one day; min_periods=48 refuses to report a rate from
     less than twelve hours.
@@ -44,6 +59,13 @@ def drydown_rate(sensor: pd.DataFrame, window: int = 96,
     df["drydown_pct_per_day"] = (
         df.groupby("device_id")["_rate"]
           .transform(lambda s: s.rolling(window, min_periods=min_periods).median()))
+
+    # Freshness, because the window counts trailing READINGS and the current one
+    # may already be NULL -- 105 rows across SENS-04/06/08. Without this column
+    # the stale rate is indistinguishable from a live one.
+    df["drydown_asof"] = (df["ts_aligned"]
+                          .where(df["soil_moisture_vwc_clean"].notna())
+                          .groupby(df["device_id"]).ffill())
     return df.drop(columns="_rate")
 
 

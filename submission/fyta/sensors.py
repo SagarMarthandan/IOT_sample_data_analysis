@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .domain import CADENCE, CHANNELS, CLOCK_OFFSET_H, FROZEN_MIN_RUN, SPEC
+from .domain import (CADENCE, CHANNELS, CLOCK_OFFSET_H, FROZEN_MIN_RUN,
+                    LEGITIMATE_PLATEAU, SPEC)
 
 # --------------------------------------------------------------------- Task 1
 
@@ -34,8 +35,15 @@ def parse_timestamps(raw: pd.Series) -> pd.Series:
 
     # `01/06/2026` is ambiguous. Day-first is provable, not assumed: a first
     # field above 12 cannot be a month.
-    first = pd.to_numeric(text[dmy].str.extract(r"^(\d{1,2})/")[0], errors="coerce")
-    assert first.max() > 12, "day-first is unproven on this input - parse is ambiguous"
+    #
+    # Only when slash dates are actually present. The assertion used to run
+    # unconditionally, so an all-ISO batch failed on an empty slice -- a guard
+    # that fires on healthy input, which is the failure mode AGENTS.md 5 names.
+    if dmy.any():
+        first = pd.to_numeric(text[dmy].str.extract(r"^(\d{1,2})/")[0], errors="coerce")
+        assert first.max() > 12, (
+            "day-first is unproven on this input - every slash date is parseable "
+            "both ways, so the ordering is a guess")
 
     return out
 
@@ -59,6 +67,17 @@ def device_coverage(sensor: pd.DataFrame, cadence: pd.Timedelta) -> pd.DataFrame
     One computation, split at the *presentation*: Task 1 prints the coverage
     columns, Task 2 prints the compliance columns. The task boundary belongs
     where the reader meets it, not duplicated into a second groupby loop.
+
+    THE WINDOW IS THE OBSERVED SPAN, and that is what the completeness figure
+    measures -- slots between this device's own first and last reading. It is not
+    an installation window. A device whose first day never arrived reports 100%
+    against the days it did deliver, because the endpoints come from the data.
+    Deleting SENS-01's first day still reports 1,920 due and 1,920 delivered.
+
+    That is a real ceiling, and it is named here rather than fixed by guessing: a
+    true grid needs the device's activation time from the platform, and the
+    sample does not carry it. `slots_due` is therefore a floor on the slots a
+    device owed, never a ceiling.
     """
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
@@ -405,16 +424,32 @@ def join_fanout(sensor: pd.DataFrame, contextual: pd.DataFrame,
 
 
 def frozen_windows(sensor: pd.DataFrame, min_run: int = FROZEN_MIN_RUN) -> pd.DataFrame:
-    """Every run of an unchanged value long enough to be a dead channel."""
+    """Every run of an unchanged value long enough to be a dead channel.
+
+    Channel-aware, because an unchanged value is only evidence of a dead sensor
+    if the channel COULD have moved. `LEGITIMATE_PLATEAU` names the values a
+    channel may honestly rest at for hours -- PAR sits at zero all night, so a
+    long run of zeros is a dark pot, not a fault. Treating that as frozen nulled
+    52 real measurements in a fixture.
+
+    ponytail: a light sensor that dies at exactly 0 is therefore missed here. The
+    check that would catch it is a daytime-zero test -- PAR at 0 while the same
+    device's own history shows light at that hour -- which is a second detector,
+    not a wider bound. No device in this sample is affected.
+    """
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
         g = g.sort_values("ts")
         for channel in CHANNELS:
+            floor = LEGITIMATE_PLATEAU.get(channel)
             for _, part in g.groupby((g[channel].diff() != 0).cumsum()):
-                if len(part) >= min_run:
-                    rows.append({"device": device, "channel": channel,
-                                 "first": part["ts"].iloc[0], "last": part["ts"].iloc[-1],
-                                 "samples": len(part), "frozen_at": part[channel].iloc[0]})
+                if len(part) < min_run:
+                    continue
+                if floor is not None and bool((part[channel] == floor).all()):
+                    continue
+                rows.append({"device": device, "channel": channel,
+                             "first": part["ts"].iloc[0], "last": part["ts"].iloc[-1],
+                             "samples": len(part), "frozen_at": part[channel].iloc[0]})
     return pd.DataFrame(rows)
 
 
@@ -464,8 +499,10 @@ FINDINGS = [
     ("F7", "SENS-05 missing 193 slots (48.5h)", "SENS-05",
      "coverage ledger against the expected 15-min grid",
      "medium", "data problem - availability",
-     "leave the gap; the ~320-reading buffer means it was recoverable, so this was "
-     "a sync failure not lost data - confirm with firmware"),
+     "leave the gap. The ~320-reading buffer makes 193 slots stay WITHIN capacity, "
+     "so recovery was possible -- an upper bound, not evidence the readings "
+     "survived. Whether they did needs transport telemetry, not arithmetic. "
+     "Reported as absence; cause unresolved"),
 
     ("F8", "SENS-08 has 15 superfluous duplicate rows", "SENS-08",
      "identical payloads, 0 conflicting",

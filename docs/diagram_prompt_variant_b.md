@@ -4,7 +4,7 @@ Single-row layout, matching `Open_Source.jpeg` so the two sit side by side as a
 pair. Reference arrows are given **by label, not by number** — the numbering in
 the earlier prompt is what produced visible `1 2 3 …` labels on the OSS image.
 
-**Save as:** `submission/out/figures/task7_variant_b.jpeg`
+**Save as:** `submission/images/task7_variant_b.jpeg`
 
 ---
 

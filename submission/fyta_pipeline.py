@@ -401,9 +401,14 @@ def main() -> None:
     tri = triangulate(cleaned, features, contextual, heads)
     shown = tri.assign(fertilised=tri["fertilised"].dt.strftime("%m-%d %H:%M"),
                        image=tri["image"].dt.strftime("%m-%d %H:%M"))
-    print(shown[["log", "plant", "fertilised", "d_ec", "noise_sd", "d_ec_sigma",
+    print(shown[["log", "plant", "fertilised", "d_ec_sigma", "probe_leg",
                  "image", "hours_off", "nutrient_def", "sensor_leg", "model_leg"]]
-          .round(3).to_string(index=False))
+          .to_string(index=False))
+    print("\n  sigma is per probe and the leg reads EVERY probe the plant owns; "
+          "`probe_leg` names the one that moved most.\n  `not testable` means a "
+          "window had no baseline or no response, which is not a failed test.")
+    for _, r in shown.iterrows():
+        print(f"    {r['log']}  {r['leg_detail']}")
     tri.to_csv(OUT / "task6_triangulation.csv", index=False)
 
     legs = (f"{int(tri['sensor_leg'].eq('rises').sum())} with an EC rise, "
@@ -491,5 +496,36 @@ def main() -> None:
           "task9_log_signals.csv, figures/")
 
 
+class _Tee:
+    """stdout to two places, so run.log IS the run rather than a copy of it.
+
+    The script printed "wrote out/: run.log" long before it wrote one -- the file
+    existed only because the shell redirected it, so a reader running the
+    documented command got a claim with no artefact behind it.
+    """
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for st in self.streams:
+            st.write(text)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    # `out/` is created by main(), but the log is opened first -- so a clean
+    # checkout failed with "no such file or directory" before doing any work.
+    # Running from nothing is the normal case for a reader, not an edge case.
+    OUT.mkdir(parents=True, exist_ok=True)
+    with open(OUT / "run.log", "w") as log:
+        sys.stdout = _Tee(sys.stdout, log)
+        try:
+            main()
+        finally:
+            sys.stdout = sys.__stdout__

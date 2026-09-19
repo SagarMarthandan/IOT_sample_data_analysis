@@ -78,6 +78,15 @@ def plant_features(sensor: pd.DataFrame, mapping: pd.DataFrame,
     slots["slot"] = slots.groupby("user_plant_id").cumcount() + 1
     assert not slots.duplicated(["device_id"]).any(), \
         "a device maps to more than one plant; the slot join would fan out"
+    # The uniqueness assert above guards the RIGHT side of the join. This guards
+    # the left: an inner merge silently drops sensor rows for any device the
+    # mapping does not mention, so one missing mapping row deletes a whole
+    # device's history with no error. Both directions, or the "unified" claim is
+    # only as good as the table nobody checked.
+    unmapped = sorted(set(sensor["device_id"]) - set(slots["device_id"]))
+    assert not unmapped, (
+        f"sensor rows for {unmapped} have no mapping row, so an inner merge would "
+        f"drop them silently; every reporting device needs a plant")
     df = df.merge(slots, on="device_id")
 
     keys = ["user_plant_id", "ts_aligned"]

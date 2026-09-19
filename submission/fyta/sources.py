@@ -6,6 +6,7 @@ the abstract but what it can and cannot be checked against.
 
 import json
 
+import numpy as np
 import pandas as pd
 
 def image_predictions(images: pd.DataFrame) -> tuple:
@@ -136,12 +137,30 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
     for _, lg in contextual[contextual["log_type"] == "fertilising"].iterrows():
         plant, at = lg["user_plant_id"], lg["created_at"]
         g = features[features["user_plant_id"] == plant]
-        before = g.loc[(g["ts_aligned"] > at - win) & (g["ts_aligned"] <= at), "ec_1"]
-        after = g.loc[(g["ts_aligned"] > at) & (g["ts_aligned"] <= at + win), "ec_1"]
-        # The device's own step noise, not a fleet-wide constant: SENS-03's
-        # drift would inflate any pooled figure and hide a real response.
-        noise = cleaned.loc[cleaned["device_id"] == g["device_1"].iloc[0],
-                            "ec_us_cm_clean"].diff().std()
+
+        # EVERY probe the plant owns, not probe 1. The first version read `ec_1`
+        # and `device_1`, so a fixture where probe 1 sat flat while probe 2 rose
+        # 500 uS/cm came back "no rise" -- the plant's own second instrument
+        # contradicted the answer and was never consulted.
+        #
+        # Sigma is per probe, because a probe's own step noise is the only fair
+        # yardstick: SENS-03's drift would inflate any pooled figure.
+        sigmas = {}
+        for i in (1, 2):
+            dev_col, ec_col = f"device_{i}", f"ec_{i}"
+            if dev_col not in g.columns or ec_col not in g.columns:
+                continue
+            dev = g[dev_col].iloc[0]
+            if pd.isna(dev):
+                continue
+            b = g.loc[(g["ts_aligned"] > at - win) & (g["ts_aligned"] <= at), ec_col]
+            a = g.loc[(g["ts_aligned"] > at) & (g["ts_aligned"] <= at + win), ec_col]
+            sd = cleaned.loc[cleaned["device_id"] == dev, "ec_us_cm_clean"].diff().std()
+            # A missing side is NOT evidence of no response. Without a baseline
+            # there is nothing to compare against, so the window is untestable.
+            if len(a) and len(b) and not pd.isna(sd) and sd > 0:
+                sigmas[str(dev)] = float((a.mean() - b.mean()) / sd)
+        best = max(sigmas, key=lambda d: sigmas[d]) if sigmas else None
 
         near = heads[heads["user_plant_id"] == plant]
         hours = ((near["captured_at"] - at).dt.total_seconds() / 3600
@@ -163,18 +182,26 @@ def triangulate(cleaned: pd.DataFrame, features: pd.DataFrame,
 
         rows.append({
             "log": lg["log_id"], "plant": plant, "fertilised": at,
-            "d_ec": after.mean() - before.mean(), "noise_sd": noise,
+            "d_ec_sigma": sigmas[best] if best else np.nan,
+            "probe_leg": best or "no probe had a window",
+            "leg_detail": ", ".join(f"{d} {s:+.2f}" for d, s in sigmas.items())
+                          or "no probe had both a baseline and a response window",
             "image": image_at, "hours_off": hours_off, "nutrient_def": nutrient,
             "only_pre_event_image": only_pre,
         })
 
     out = pd.DataFrame(rows)
-    out["d_ec_sigma"] = (out["d_ec"] / out["noise_sd"]).round(2)
     # A RISE, not a change. `.abs()` here would let a large FALL count as
     # corroboration -- the opposite of the hypothesis under test. The label was
     # once quietly renamed from "rises" to "moves" to match the code, which hid
     # the error rather than fixing it.
-    out["sensor_leg"] = (out["d_ec_sigma"] > LEG_SIGMA).map({True: "rises", False: "no rise"})
+    #
+    # Three states, not two. An untestable window is not a failed one: reporting
+    # `NaN` as "no rise" counts absent evidence as negative evidence.
+    out["d_ec_sigma"] = out["d_ec_sigma"].round(2)
+    out["sensor_leg"] = np.where(
+        out["d_ec_sigma"].isna(), "not testable",
+        np.where(out["d_ec_sigma"] > LEG_SIGMA, "rises", "no rise"))
     # "no post-event image" is not the same finding as "the model looked and
     # stayed silent", so it is its own state. And even a post-event score is a
     # LEVEL, not a change: it shows the symptoms were present after the feed, not
