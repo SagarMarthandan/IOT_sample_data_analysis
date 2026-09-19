@@ -500,14 +500,14 @@ image predictions       28 model output yes on water - independence unestablishe
   span         : 2026-06-01 00:00:00 -> 2026-06-21 23:45:00
 
 -- per plant
-                                      rows  probes  vwc_coverage  longest_gap_h
-user_plant_id species                                                          
-UP-1001       Monstera deliciosa      2016       2         1.000            0.2
-UP-1002       Ficus lyrata            2016       1         1.000            0.2
-UP-1003       Zamioculcas zamiifolia  2016       2         0.976            0.2
-UP-1004       Basil (indoor)          1823       1         1.000           48.5
-UP-1005       Phalaenopsis orchid     2016       1         1.000            0.2
-UP-1006       Pothos                  2016       1         0.994            0.2
+                                      rows  missing  probes  probes_filled  longest_gap_h
+user_plant_id species                                                                    
+UP-1001       Monstera deliciosa      2016        0       2          1.000            0.2
+UP-1002       Ficus lyrata            2016        0       1          1.000            0.2
+UP-1003       Zamioculcas zamiifolia  2016        0       2          0.324            0.2
+UP-1004       Basil (indoor)          1823      193       1          1.000           48.5
+UP-1005       Phalaenopsis orchid     2016        0       1          1.000            0.2
+UP-1006       Pothos                  2016        0       1          0.994            0.2
 
   published: plant_features.csv
 
@@ -530,9 +530,16 @@ UP-1006       Pothos                  2016       1         0.994            0.2
   15-minute resolution. Consumers should join both AS-OF with an explicit
   tolerance. That is a modelling decision, not one this table makes silently.
 
-  Also not done: the 48.5-hour outage (F7) is left as absent rows, made visible
-  by `gap_minutes` on the row that follows it. Filling it would fabricate 193
-  readings that were never taken.
+  Also not done: the 48.5-hour outage (F7) is left as ABSENT ROWS -- that is the
+  193 in UP-1004's `missing` column above. `gap_minutes` flags the row that follows
+  it. Filling it would fabricate 193 readings that were never taken.
+
+  Read the two columns carefully, they are different claims. `missing` is slots
+  the device never reported. `probes_filled` is the share of the rows that ARE
+  here where every probe the plant has carries a moisture value -- so UP-1003
+  reads 0.324, not the 0.976 its first probe alone would give, because SENS-06 is
+  frozen for 1,344 slots (F3). UP-1004 is missing 9.6% of its grid and completely
+  filled within the 90.4% it delivered.
 
 ==============================================================================
 6a. TRIANGULATION - can three sources confirm a fertilising event?

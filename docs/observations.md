@@ -273,6 +273,79 @@ so neither can validate the other — and a tidy vocabulary does not change that
 
 ## Task 5 — one table, and the two decisions inside it
 
+### "Why does UP-1004 have 1823 rows, not 2016?"
+
+> *"in task 5 UP-1004 Basil (indoor) 1823 1 1.000 48.5 — it shows 1823 rows instead of 2016 .. if vwc had no values, then the single feature table must have 2016 rows for UP 1004 with this null values right ?"*
+
+**No — and there are no null moisture values to carry.**
+
+```
+UP-1004   rows 1823   vwc_1 nulls 0   coverage of DELIVERED readings 1.000
+```
+
+Every one of its 1823 rows holds a moisture value. And SENS-05 never sent 2016
+readings — it sent **1823**. The other 193 are `(device_id, timestamp)` pairs that
+do not exist in the raw file: **one outage, 2026-06-12 23:45 → 2026-06-15 00:15,
+48.5 hours**, which is F7.
+
+So the real choice is not "values vs nulls". It is:
+
+| Design | UP-1004 rows | What they assert |
+|:---|--:|:---|
+| **Sparse** — shipped | 1823 | only what the device reported |
+| **Dense grid** | 2016 | 1823 real + **193 timestamps no instrument measured** |
+
+The dense version manufactures a row at a time nothing was measured. `AGENTS.md`
+§6 forbids exactly that. The device did not *miss a reading* — it was **offline**,
+and an absent row plus a `gap_minutes` flag says that; a NULL row says something
+different and false.
+
+The reconciliation is exact, which is the check that the sparse grain is honest:
+
+```
+rows 11,903   vs   expected slots 12,096   →  193 missing = SENS-05's outage, exactly
+```
+
+**What the question actually caught — two defects, not one.**
+
+*First, the row does not explain its own count.* `rows 1823` beside five `2016`s
+is indistinguishable from a filter bug. `longest_gap_h 48.5` flags that something
+happened but not how much. A `missing` column now carries the 193, so the row
+answers the question without prose.
+
+*Second — and this is the one that was actually wrong — `vwc_coverage` was
+computed on `vwc_1` alone, under a name claiming the plant.* Probe 1 for UP-1003
+is SENS-04; probe 2 is SENS-06, the frozen channel (F3). So the column read:
+
+```
+UP-1003   vwc_coverage 0.976      <- probe 1 only
+UP-1003   every probe   0.324      <- what the header implies
+```
+
+**0.976 is not conservative, it is wrong.** A reader would conclude UP-1003 is
+almost complete when two thirds of its moisture is unusable. It is now
+`probes_filled`, computed as the share of present rows where **every** probe the
+plant owns carries a value, with absent probes passing automatically so a
+one-probe plant is not judged on its empty `vwc_2` column.
+
+That defect was **pre-existing and independent of the question's premise.** The
+premise — that the raw data holds 2016 readings for SENS-05 — was wrong; the raw
+data holds 1823, and the 193 absent rows are F7. But `vwc_coverage` described
+itself as the plant's coverage while computing probe 1's, and that survived the
+first audit, the second audit and the ponytail review, because every check asked
+*"does the number compute?"* and none asked *"does the header describe what is
+computed?"*
+
+**A wrong premise can still land on a real defect.** The inference was faulty; the
+place it pointed at was not. Worth separating, because dismissing the question
+along with the premise would have shipped a column reading 0.976 where the truth
+is 0.324.
+
+**The general lesson:** when a table's row count varies by key, the expected count
+belongs next to it. Not because the current number is wrong, but because a reader
+cannot tell a *known* gap from an *unknown* one without it.
+
+
 Grain is `(user_plant_id, ts_aligned)`, declared **and asserted** — 11,903 rows,
 0 duplicate keys.
 

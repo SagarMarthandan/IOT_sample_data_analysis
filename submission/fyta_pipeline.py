@@ -48,7 +48,7 @@ import pandas as pd
 
 from fyta.cleaning import audit, clean
 from fyta.domain import CADENCE, CHANNELS, IMPOSSIBLE, SPEC
-from fyta.features import assert_grain, plant_features
+from fyta.features import assert_grain, plant_features, plant_summary
 from fyta.sensors import (
     COVERAGE_COLS, EVIDENCE_NOTES, FINDINGS, align_clocks, check_grid,
     detection_coverage_frame,
@@ -359,12 +359,7 @@ def main() -> None:
           f"{features['ts_aligned'].max()}")
 
     print("\n-- per plant")
-    per = features.groupby(["user_plant_id", "species"], sort=True).agg(
-        rows=("ts_aligned", "size"),
-        probes=("n_sensors", "first"),
-        vwc_coverage=("vwc_1", lambda s: round(float(s.notna().mean()), 3)),
-        longest_gap_h=("gap_minutes", lambda s: round(float(s.max()) / 60, 1)))
-    print(per.to_string())
+    print(plant_summary(features).to_string())
 
     features.to_csv(OUT / "plant_features.csv", index=False)
     print("\n  published: plant_features.csv")
@@ -389,9 +384,16 @@ def main() -> None:
   15-minute resolution. Consumers should join both AS-OF with an explicit
   tolerance. That is a modelling decision, not one this table makes silently.
 
-  Also not done: the 48.5-hour outage (F7) is left as absent rows, made visible
-  by `gap_minutes` on the row that follows it. Filling it would fabricate 193
-  readings that were never taken.""")
+  Also not done: the 48.5-hour outage (F7) is left as ABSENT ROWS -- that is the
+  193 in UP-1004's `missing` column above. `gap_minutes` flags the row that follows
+  it. Filling it would fabricate 193 readings that were never taken.
+
+  Read the two columns carefully, they are different claims. `missing` is slots
+  the device never reported. `probes_filled` is the share of the rows that ARE
+  here where every probe the plant has carries a moisture value -- so UP-1003
+  reads 0.324, not the 0.976 its first probe alone would give, because SENS-06 is
+  frozen for 1,344 slots (F3). UP-1004 is missing 9.6% of its grid and completely
+  filled within the 90.4% it delivered.""")
 
     # ================================================================== TASK 6
     h("6a. TRIANGULATION - can three sources confirm a fertilising event?")

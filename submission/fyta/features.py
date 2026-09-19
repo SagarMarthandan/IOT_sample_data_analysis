@@ -126,3 +126,40 @@ def assert_grain(features: pd.DataFrame) -> int:
     dup = int(features.duplicated(["user_plant_id", "ts_aligned"]).sum())
     assert dup == 0, f"grain (user_plant_id, ts_aligned) broken: {dup} duplicate keys"
     return len(features)
+
+
+def plant_summary(features: pd.DataFrame) -> pd.DataFrame:
+    """Per-plant row counts against the grid each plant was due.
+
+    `missing` exists so a short plant explains its own row count. Without it a
+    plant with absent rows is indistinguishable from a filter bug -- which is a
+    question a reader asked of UP-1004, whose 193 absent rows are the 48.5-hour
+    outage (F7).
+
+    `probes_filled` is a different claim and is named for it: the share of rows
+    PRESENT where **every** probe the plant has carries a moisture value.
+    UP-1004 is missing 9.6% of its grid and is fully filled within the part it
+    delivered.
+
+    It is deliberately not the share of the grid, and deliberately not probe 1
+    alone. Probe 1 alone reports UP-1003 at 0.976 while its second probe is frozen
+    for 1,344 slots (F3); judged on both probes the plant is 0.324. A column that
+    says 0.976 there is not conservative, it is wrong.
+    """
+    n = int(features["n_sensors"].max())
+    vwcs = [f"vwc_{i}" for i in range(1, n + 1)]
+    # A plant with one probe must not be judged on its empty `vwc_2` column, so
+    # columns the plant does not own pass automatically.
+    own = pd.DataFrame({c: features["n_sensors"] >= i + 1 for i, c in enumerate(vwcs)},
+                       index=features.index)
+    filled = (features[vwcs].notna() | ~own).all(axis=1)
+
+    per = features.assign(_s=pd.to_datetime(features["ts_aligned"]), _f=filled).groupby(
+        ["user_plant_id", "species"], sort=True).agg(
+        rows=("ts_aligned", "size"),
+        _due=("_s", lambda x: int((x.max() - x.min()).total_seconds() // 900) + 1),
+        probes=("n_sensors", "first"),
+        probes_filled=("_f", lambda x: round(float(x.mean()), 3)),
+        longest_gap_h=("gap_minutes", lambda x: round(float(x.max()) / 60, 1)))
+    per.insert(1, "missing", per.pop("_due") - per["rows"])
+    return per
