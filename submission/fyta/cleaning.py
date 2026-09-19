@@ -17,6 +17,13 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
     alongside it. Nothing is clipped, averaged or interpolated. Every value that
     is removed is recorded with its reason, in a separate table.
 
+    TWO TIME COLUMNS, and the difference matters. `timestamp` is the SOURCE TEXT
+    exactly as delivered -- mixed format on purpose, because SENS-07 writes
+    DD/MM while the rest write ISO, and rewriting it would destroy the evidence
+    that the two formats coexist. `ts_aligned` is the single datetime a consumer
+    should use: ISO, uniform, clock-corrected. Anything that joins two outputs
+    joins on `ts_aligned`.
+
     Returns (cleaned, rejections, flags).
     """
     df = sensor.drop_duplicates(["device_id", "ts"]).reset_index(drop=True).copy()
@@ -42,6 +49,7 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
              & (df["ts"] <= w["last"]))
         rejections.append(pd.DataFrame({
             "device_id": df.loc[m, "device_id"], "timestamp": df.loc[m, "timestamp"],
+            "ts_aligned": df.loc[m, "ts_aligned"],
             "channel": w["channel"], "raw_value": df.loc[m, w["channel"]],
             "reason": f"frozen_channel ({w['samples']} samples at {w['frozen_at']})"}))
         df.loc[m, col] = np.nan
@@ -55,6 +63,7 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
             rejections.append(pd.DataFrame({
                 "device_id": df.loc[impossible, "device_id"],
                 "timestamp": df.loc[impossible, "timestamp"],
+                "ts_aligned": df.loc[impossible, "ts_aligned"],
                 "channel": channel, "raw_value": df.loc[impossible, channel],
                 "reason": f"impossible (outside [{lo_imp}, {hi_imp}])"}))
             df.loc[impossible, col] = np.nan
@@ -82,8 +91,8 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
     # is the only datetime a consumer needs. For 7 of 8 devices they coincide.
     df = df.drop(columns=["ts"])
     rejections = (pd.concat(rejections, ignore_index=True) if rejections
-                  else pd.DataFrame(columns=["device_id", "timestamp", "channel",
-                                             "raw_value", "reason"]))
+                  else pd.DataFrame(columns=["device_id", "timestamp", "ts_aligned",
+                                             "channel", "raw_value", "reason"]))
     return df, rejections
 
 

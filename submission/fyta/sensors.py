@@ -274,22 +274,106 @@ def screen_drift(sensor: pd.DataFrame, channels, days: int = 7) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("shift_vs_own_noise", ascending=False)
 
 
+#: What each log type should do to which channel, and in which direction.
+#: `None` means the event is not directional -- a repot disturbs the probe
+#: without pushing any channel a particular way.
+LOG_EXPECTATION = {
+    "watering":    ("soil_moisture_vwc", "rises"),
+    "fertilising": ("ec_us_cm",          "rises"),
+    "light":       ("light_par",         "peak moves as the phrase says"),
+    "repotting":   (None,                "some channel steps"),
+}
+
+#: Which way a light log should move the daily light peak. "Rotated toward the
+#: light" is absent on purpose: rotating a plant does not change its distance
+#: from the window, so no direction is implied and it cannot be tested.
+LIGHT_DIRECTION = {"Moved closer to window": +1, "Too much direct sun, moved back": -1}
+
+
 def log_alignment(sensor: pd.DataFrame, mapping: pd.DataFrame,
-                  contextual: pd.DataFrame, window_h: int = 6, rise: float = 1.0) -> pd.DataFrame:
-    """Does each watering log coincide with a moisture rise?"""
-    first = mapping.groupby("user_plant_id").device_id.first()
+                  contextual: pd.DataFrame, window_h: int = 6,
+                  sigma: float = 3.0) -> pd.DataFrame:
+    """Does each log type coincide with the change ITS OWN sensor should show?
+
+    Every log type names a physical event, so each has a channel that ought to
+    respond. F11 was first claimed from the **watering leg alone** -- one of four
+    -- and generalising from one case is the mistake this project exists to
+    catch. All four are tested here, and each row states what it expects.
+
+    The threshold is `sigma` x that channel's own step noise, so it scales: 1
+    uS/cm means nothing against EC's noise of ~57, while it is a real jump in
+    moisture whose noise is ~0.14. One absolute threshold cannot serve both, and
+    tuning one per channel by hand would be a fitted result.
+
+    Every probe on a plant is tested, and a log counts as matched if ANY of them
+    responded. Testing only the first device silently ignores the second probe on
+    a two-sensor plant, and for UP-1001 that changes the answer.
+
+    What it CANNOT do is attribute a log to a probe: the log carries no device
+    id, so on a two-sensor plant "the user watered" has no unambiguous device to
+    attach to. That is F9.
+    """
     rows = []
-    for plant, device in first.items():
-        g = sensor[sensor.device_id == device].sort_values("ts")
-        shift = pd.Timedelta(hours=2) if device == "SENS-07" else pd.Timedelta(0)
-        movement = pd.Series(g.soil_moisture_vwc.values, index=g.ts - shift).diff()
-        logs = contextual[(contextual.user_plant_id == plant)
-                          & (contextual.log_type == "watering")].created_at
-        hits = sum(1 for t in logs
-                   if movement[(movement.index >= t)
-                               & (movement.index <= t + pd.Timedelta(hours=window_h))].max() > rise)
-        rows.append({"plant": plant, "device": device, "watering_logs": len(logs),
-                     "with_sensor_rise": hits})
+    for log_type, (channel, expectation) in LOG_EXPECTATION.items():
+        logs = contextual[contextual["log_type"] == log_type]
+        # LIGHT is reported PER PHRASE, because the phrases imply opposite
+        # directions. "Moved closer to window" should raise the light peak;
+        # "Too much direct sun, moved back" should lower it. Collapsing them into
+        # one count hides the contradiction, which is the actual finding.
+        groups = ([(text, logs[logs["text"] == text])
+                   for text in sorted(set(logs["text"]) & set(LIGHT_DIRECTION))]
+                  if log_type == "light" else [("", logs)])
+        for text, group in groups:
+            if group.empty:
+                continue
+            direction = LIGHT_DIRECTION.get(text) if text else None
+            tested = matched = 0
+            shifts = []
+            for _, lg in group.iterrows():
+                t = lg["created_at"]
+                for device in sorted(mapping.loc[mapping["user_plant_id"]
+                                                 == lg["user_plant_id"], "device_id"]):
+                    g = sensor[sensor["device_id"] == device].sort_values("ts")
+                    if g.empty:
+                        continue
+                    shift = pd.Timedelta(hours=CLOCK_OFFSET_H.get(device, 0))
+                    if log_type == "repotting":
+                        before = g.loc[(g["ts"] > t - pd.Timedelta(hours=24)) & (g["ts"] <= t)]
+                        after = g.loc[(g["ts"] > t) & (g["ts"] <= t + pd.Timedelta(hours=24))]
+                        if len(before) < 8 or len(after) < 8:
+                            continue
+                        tested += 1
+                        matched += int(any(
+                            abs(after[c].mean() - before[c].mean()) > sigma * g[c].diff().std()
+                            for c in CHANNELS))
+                    elif log_type == "light":
+                        peak = g.set_index(g["ts"] - shift)["light_par"].resample("1D").max()
+                        b = peak[peak.index < t.normalize()].tail(3).mean()
+                        a = peak[peak.index >= t.normalize()].head(3).mean()
+                        if pd.isna(a) or pd.isna(b):
+                            continue
+                        tested += 1
+                        shifts.append(a - b)
+                        matched += int((a - b) * direction > sigma * peak.std())
+                    else:
+                        movement = pd.Series(g[channel].to_numpy(),
+                                             index=g["ts"] - shift).diff()
+                        window = movement[(movement.index > t)
+                                          & (movement.index <= t + pd.Timedelta(hours=window_h))]
+                        if window.empty:
+                            continue
+                        tested += 1
+                        matched += int(window.max() > sigma * g[channel].diff().std())
+            rows.append({
+                "log_type": log_type,
+                "phrase": text or "(all)",
+                "logs": len(group), "tested": tested, "responded": matched,
+                "expected": (
+                    f"{channel} peak {'rises' if direction and direction > 0 else 'falls'}"
+                    if direction else
+                    f"{channel} {expectation}" if channel else expectation),
+                "mean_shift": round(float(np.mean(shifts)), 1) if shifts else None,
+            })
     return pd.DataFrame(rows)
 
 
@@ -403,7 +487,12 @@ FINDINGS = [
      "ask product whether the app allows two sensors per plant; do not average"),
 
     ("F11", "Watering logs and sensor events are unrelated", "all plants",
-     "32 of 34 watering logs have no moisture rise within 6h. The sensor's own "
+     "31 of 34 watering logs have no moisture rise within 6h -- and 3 hits is "
+     "below the ~3.5 expected by chance, so the matches carry no information. "
+     "All four log types were tested against the channel their own event should "
+     "move, and none lines up. LIGHT CONTRADICTS: 'Moved closer to window' moves "
+     "the daily light peak DOWN by 4.4 on average, the opposite of what it claims "
+     "(n=3, within the daily sd of 5.3 -- suggestive, not proof). The sensor's own "
      "rises land exactly on the hour -- 35 of 37 excluding SENS-08 -- while the "
      "logs are all at human times, so the two look independently generated",
      "high", "label problem",
@@ -575,6 +664,58 @@ def colocated_correlation(sensor: pd.DataFrame, mapping: pd.DataFrame,
             rows.append({"plant": plant, "a": a, "b": b, "n": len(pair),
                          "r": round(float(pair[a].corr(pair[b])), 3)})
     return pd.DataFrame(rows)
+
+
+#: One line per evidence table: what question it answers. Keyed by the same title
+#: `evidence_tables` uses, so the run log and the notebook cannot disagree about
+#: what a column means -- and so an output is readable without reading the code.
+EVIDENCE_NOTES = {
+    "declared grain violated":
+        "rows sharing a key. Identical payloads are a redelivery; differing ones "
+        "are unorderable. Both kept.",
+    "joins that multiply rows":
+        "row count before and after joining each table to the mapping. A rise "
+        "means the join key is not unique on the right.",
+    "coverage against the grid":
+        "every slot each device was due, as delivered / missing / surplus. Row "
+        "counts hide a device that is half-present.",
+    "outside published range":
+        "readings outside the spec. `runs` = separate stretches; `isolated` = a "
+        "stretch of one; `in_runs` = inside a stretch of 2+.",
+    "dark-hour light spikes":
+        "a light reading at night its own neighbours cannot explain. Flagged, not "
+        "deleted -- a lamp would be a real observation.",
+    "frozen channels":
+        "runs of an unchanged value long enough to be a dead channel. Only a fault "
+        "if the device's OTHER channels keep moving.",
+    "clock offsets":
+        "each device's clock, from sliding its daylight curve against the fleet's. "
+        "Correlation at zero shift vs at the best shift.",
+    "temperature unit scale":
+        "how much each device's temperature jitters. A unit change scales jitter "
+        "by 1.8, which correlation cannot see.",
+    "EC drift fit":
+        "where a device's EC starts climbing, and how fast. The onset must be "
+        "found first -- a whole-record fit halves the rate.",
+    "drift vs own history (top 6 of 40)":
+        "channels whose recent level has left their own band, ranked against that "
+        "channel's own noise rather than the fleet's.",
+    "watering logs vs sensor":
+        "for each log type, does the channel its own event should move, move? "
+        "F11 was first claimed from the watering leg alone.",
+    "cross-device correlation":
+        "mean pairwise r between devices, per channel. High = one shared ambient "
+        "signal, so 'differs from the fleet' is not a usable test there.",
+    "where a moisture rise lands":
+        "the minute each rise falls on. A real watering does not care what minute "
+        "it is; rises on :00 are a scheduler.",
+    "co-located probes, same plant":
+        "two probes on one plant share a reservoir, so they must move together. A "
+        "near-zero r means they do not.",
+    "moisture jitter by device":
+        "median change between consecutive readings. A noisy or wrongly-scaled "
+        "channel shows up as a ratio against the fleet.",
+}
 
 
 def evidence_tables(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.DataFrame,

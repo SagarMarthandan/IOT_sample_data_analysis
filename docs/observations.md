@@ -163,6 +163,56 @@ three are reports *about* the plant.
 | **Image predictions** | Internally consistent ✅ — agrees with the sensors on water at r = 0.75. **Whether that is corroboration or an artefact of the generator is unestablished** (see below). Independent heads never fire |
 | **Sensor data** | The reference. Its own defects are Tasks 1–3 |
 
+
+### The two controls on the comparison
+
+**Dryness is a within-device rank**, because VWC is only comparable *within* a
+substrate — an absolute threshold is the wrong question across substrates.
+
+**Same code, raw and cleaned**, clock held constant, so the sensors are the only
+input that differs. If the answer moves, it rests on my cleaning rather than on
+the data.
+
+### The head ranges, and which heads can even be tested
+
+Across all 28 photos:
+
+| Head | max | Measures | Independent of the probe? |
+|:---|--:|:---|:---|
+| `Abiotic` | 0.680 | anything non-living (parent) | ✗ |
+| `Water-related issue` | 0.625 | water (parent) | ✗ |
+| `Water deficiency` | 0.635 | water | ✗ |
+| `Water excess / uneven` | 0.378 | water | ✗ |
+| `Nutrient deficiency` | 0.073 | nutrients | ~ |
+| `Fungi` | **0.054** | fungus | **✓** |
+| `Animalia` | **0.057** | pests | **✓** |
+
+**4 of 7 heads carry any signal.** The three that never fire are the three that
+could have said something the probe cannot see — a head that never asserts
+anything can neither agree nor disagree.
+
+```
+photos crossing a 0.5 threshold:
+  Abiotic 6   Water deficiency 4   Water-related 3
+  Water excess 0   Nutrient deficiency 0   Fungi 0   Animalia 0
+```
+
+`Fungi` and `Animalia` vary (0.008–0.054) so they are not dead channels like
+SENS-06 — they report *low*, consistently. The problem is that there is **no
+positive example anywhere in the sample**, so there is nothing to validate
+against. Two readings fit, and the data supports neither: the plants are healthy,
+or the heads cannot fire. What would separate them is one photo with a visible
+infection, and that is a horticulture question, not a vendor one.
+
+### The raw-vs-cleaned control, in numbers
+
+Same code, two sensor frames, clock held constant:
+
+- every metric is **identical** on raw and cleaned outside the seven `r()` rows
+- those seven move by **at most 0.056**
+
+So the Task 4 conclusions do not rest on Task 3's choices.
+
 ### Why the image model's agreement is not a pass
 
 `Water deficiency` correlates with dryness at **+0.75** and `Water excess` at
@@ -195,6 +245,29 @@ the check that the model-side analysis never touched sensor values.
 **A feature, never a label.** `is_healthy` is withheld — it is exactly
 `probability > 0.5`. Gate at ingestion: pin `model_version`, fail on an unknown
 head name, treat a new class as a schema event.
+
+### The log consistency is not a compliment
+
+Fourteen phrases, all single-purpose, and **not one of the 49 rows is ambiguous** —
+no *"watered and fed"*, no *"repotted, watered it in"*. A user typing freely
+eventually writes something that belongs to two categories. None of them do.
+
+Either the text is **canned** (a picker in the app), in which case 1:1 is a schema
+constraint rather than a quality signal; or it is **free text**, in which case
+perfect consistency across 49 rows is a **generation signature**. Either way the
+tick is not earned.
+
+It sits alongside F11: the logs do not line up with the sensors, and the sensor's
+own rises land exactly on the hour. **Both sources look independently generated**,
+so neither can validate the other — and a tidy vocabulary does not change that.
+
+### What would settle each open question
+
+| Question | What settles it | Owner |
+|:---|:---|:---|
+| Is the image model independent, or does one generator emit both? | Model lineage — did the model consume VWC? | Vendor |
+| Are the logs real events, or generated? | Does the app offer canned phrases? | Product |
+| Is the sample capable of testing independence at all? | A photo with a real infection, or a plant shot while well watered | Horticulture |
 
 ---
 
@@ -669,6 +742,63 @@ The same kind of drift had already happened between the notebook and the script.
 **The rule: whenever two things describe the same fact, something has to check
 they still agree.**
 
+## 2.11 A claim tested on one leg is not tested
+
+> *"for every log type -> if fertilizing -> EC_us_cm should change, water -> vwc should change, light -> light_par must change and repotting -> all values must change in some way"*
+
+F11 says the logs do not line up with the sensors. It was claimed from **one leg**:
+watering logs against a moisture rise. But every log type names a physical event,
+so each has a channel that should respond. Testing all four:
+
+| Log type | Should show | Result |
+|:---|:---|:---|
+| watering | moisture **rises** | 3 of 45 — **below** the ~3.5 expected by chance |
+| fertilising | EC **rises** | 0 of 8 |
+| light | daily peak moves, directionally | 0 of 5 — **and one contradicts** |
+| repotting | some channel steps | 1 of 3 — **confounded**; every repot has a watering within a day |
+
+The claim holds, and is *stronger* than it was: the light leg contradicts rather
+than merely failing. But that only appeared once all four were run.
+
+**The general lesson.** "None of the tests I ran found a signal" is a statement
+about the search. "Every test that could have found a signal found none" is a
+statement about the world. Only the second is worth reporting, and the difference
+is whether you enumerated the legs before you concluded.
+
+It also cuts the other way. The **repotting** leg is not a clean negative —
+1 of 3, and every repot has a watering within a day, one of them 30 minutes
+later. A repot may well disturb the probe; **the data cannot separate it from the
+watering.** That is a third category between "responds" and "doesn't": *cannot
+be told apart.*
+
+## 2.12 Ask for the direction, not just the change
+
+Two places where testing *magnitude* instead of *sign* hid a finding.
+
+**`triangulate` used `.abs()`** on the EC delta. The brief specifies a **rise**;
+a large **fall** scored as support for the hypothesis. Worse, the label was
+renamed from `rises` to `moves` to match the code — which hid the error rather
+than fixing it. A rename is not a fix.
+
+**The light logs.** *"Moved closer to window"* should **raise** the daily light
+peak. It **falls**, by 4.4 on average. A "did it change?" test gives roughly zero
+and reads as nothing happening; a directional test gives the **wrong sign**, which
+is a finding.
+
+```
+light  "Moved closer to window"          3 tested   peak RISES   −4.4   ✗
+light  "Too much direct sun, moved back" 2 tested   peak FALLS   −3.3   ✓
+```
+
+**The general lesson.** A difference is ambiguous — it could be noise, drift, or a
+response. A **signed** difference against a stated expectation is not. Where the
+domain says which way a quantity should move, test that, not whether it moved.
+
+And phrase the expectation per claim, not per category. The three light phrases
+imply *different* directions, and one implies none at all — *"rotated toward the
+light"* does not change the plant's distance from the window. Collapsing them into
+one count diluted the signal and hid the sign.
+
 ---
 
 # Part 3 — What went wrong, and what caught it
@@ -696,6 +826,13 @@ An honest record. Most of these were caught by a mechanism, not by care.
 | A "delete the duplicate line" edit added two instead | Reading the result instead of assuming | The edit tool reported success. It matched, and matched again |
 | The notebook kept the old 3-argument call after a signature change | nbconvert **aborting** — which then left stale outputs behind, so the first check *looked* clean | Same class as the deleted-function bug above. Nothing in the notebook is compiled against the module |
 | Claimed the context compaction had worked | **Your screenshot** — the counter was unchanged | I asserted a mechanism I had not verified. It is *"report a number you have not seen the output for"*, applied to a claim about my own tooling |
+| F4 read as "SENS-03 ramps 136 µS/cm/day" | It is **flat at ~700 for ten days, then ramps from 06-11** — a regime change with an onset, not a constant drift | Measuring the daily means for Task 6 |
+| `log_alignment` tested "the plant" | It tested `device_id.first()` — **one arbitrary probe**. For UP-1001 that changes the answer, because SENS-02 rises where SENS-01 does not | **Your question** about F9 |
+| F11 covered "the logs" | **One of four log legs.** All four now tested; the light leg contradicts | **Your question** about the other log types |
+| Sliced `sensors.py` with a boundary *before* the start | **Duplicated half the file** (983 lines, 2 defs each) | Inspecting the line count |
+| `git checkout HEAD -- sensors.py` to repair that | **Destroyed two pieces of uncommitted work** — `EVIDENCE_NOTES` and the multi-probe fix. Both redone | Noticing the import error |
+| Rewrote Task 2's evidence section when Task 4 was asked for | Reverted | **Your correction** — the fourth adjacent-but-unrequested change |
+| nbconvert reported `0 errors` | It had **aborted without writing**, leaving the previous run's outputs. Happened three times | Reading the outputs, not the exit code |
 | F4 read as "SENS-03 ramps 136 µS/cm/day" | It is **flat at ~700 for ten days, then ramps from 06-11** — a regime change with an onset, not a constant drift | Measuring the daily means for Task 6 |
 
 **The pattern:** the audit gate, the ponytail review, and actually running the

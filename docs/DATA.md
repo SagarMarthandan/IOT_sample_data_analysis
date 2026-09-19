@@ -482,6 +482,41 @@ One more thing worth knowing: **±5 % is the sensor's own rated accuracy** **[D]
 Much of the small up-and-down between consecutive readings (±0.14) is *within
 spec* and is not a fault — it is what the device is allowed to do.
 
+### How the "impossible" bounds were chosen
+
+Two of the five are **definitional** — arithmetic, not judgement:
+
+| Bound | Why it is provable |
+| :--- | :--- |
+| `soil_moisture_vwc` 0 … 100 | a volume fraction cannot exceed 100 % or go below 0 |
+| `air_humidity_pct` 0 … 100 | relative humidity is capped by definition |
+
+The other three are **judgement calls, and deliberately wide**:
+
+| Bound | Reasoning |
+| :--- | :--- |
+| `soil_temp_c` −30 … 70 °C | Potted soil. Below −30 it is frozen solid; above 70 it would kill the plant, so it is not a soil temperature. Wide enough that an outdoor pot in a Berlin winter cannot trip it |
+| `ec_us_cm` 0 … 20 000 µS/cm | ~12× the published ceiling, and about 40 % of seawater. Real salinity extremes must not be nulled |
+| `light_par` 0 … 2 500 µmol | Full summer sun is ~2000–2200. 2500 is *brighter than the sun* |
+
+**The asymmetry decides the width.** A bound set too narrow **nulls real data** —
+destructive, and unrecoverable in the published table. A bound set too wide
+merely leaves junk *flagged*, which is visible and reversible. So the impossible
+ceiling sits well above the specified ceiling (1.25× to 12×), and the flag band
+does the work in between.
+
+**They are deliberately not derived from the data.** A quantile cut or a "3σ from
+the fleet mean" rule moves with the data, so a fleet-wide fault would shift the
+bound and hide inside it. A fixed physical limit cannot.
+
+**Order matters as much as the bound.** `soil_temp_c` is checked *after* the
+Fahrenheit conversion. Checked before it, SENS-07's raw range of 61.9–78.0 °F
+looks like 62–78 °C and **982 perfectly good readings would be nulled**.
+
+**And all three rest on a conversation.** They depend on **D1** — are the
+published ranges current for this hardware generation? They are set generously so
+a wrong answer is survivable, but hardware can settle them properly.
+
 ---
 
 ## 9. Join recipes — and the one trap

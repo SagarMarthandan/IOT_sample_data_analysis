@@ -28,7 +28,9 @@ taken with the wrong premise is a re-run, not a patch.
 | **D10** | Near-identical environment treated as an artefact | Whether these 8 devices are co-located | Product / Data | Discarding a real shared ambient signal (F12) |
 | **D11** | Two sensors on one plant left separate | Real configuration, or a mapping bug | Product | Task 5 cannot build a per-plant table (F10) |
 | **D12** | `soil_temp_c` deliberately absent from `SPEC` | Ambient range ≠ soil range | Hardware | A soil spec exists and I'm not applying it |
-| **D13** | The 8 dark-hour light readings are flagged, not deleted | Whether a light at that pot can be real | Firmware | Deleting real observations, or keeping glitches |
+| **D13** | Eight dark-hour light readings are **kept**, not deleted | A lamp at 01:00 is physically possible | Firmware | Deleting a real observation |
+| **D14** | The image model's r = 0.75 is **unestablished**, not circular | The dataset is synthetic; one generator may emit both | Vendor | Over- or under-trusting the image heads |
+| **D15** | The 1:1 phrase→type mapping is a **generation signature**, not a tick | 49 rows, zero ambiguous phrases | Product | Misreading a constraint as a quality signal |
 
 ---
 
@@ -311,6 +313,46 @@ temperature has no validity ceiling at all: `IMPOSSIBLE` bounds it loosely at
 
 **Ask:** does a soil-temperature measurement range exist? If it does, it belongs
 in `SPEC`.
+
+---
+
+## D14 · The image model's agreement is reported as unestablished
+
+**Choice.** Task 4 says the model agrees with the probe on water at r = 0.75, and
+that **whether that is corroboration or an artefact cannot be told from this
+data**. An earlier draft called the agreement "circular"; that was wrong. Two
+instruments on one latent variable *is* corroboration.
+
+**Rests on.** The water heads are mirror images (+0.75 / −0.75) with both parent
+classes between them, so the model has one thing to say and the probe already
+says it. And the dataset is **synthetic** — one generator could have emitted both
+series from the same latent state, in which case r says nothing about the world.
+
+**If wrong.** If the model is genuinely independent, `r = 0.75` becomes real
+convergent evidence and the water heads are worth more than "use as a feature".
+If it consumed VWC, the agreement is a tautology and the heads are worth less.
+
+**Ask:** did the image model consume VWC or any sensor-derived quantity, and was
+the assessment's image data produced by the same generator as the sensor series?
+
+---
+
+## D15 · The log vocabulary is treated as a generation signature, not a quality win
+
+**Choice.** Task 4 no longer marks "one `log_type` per phrase" as a tick. Fourteen
+phrases, all single-purpose, and **not one of the 49 rows is ambiguous** — no
+*"watered and fed"*, no *"repotted, watered it in"*.
+
+**Rests on.** A user typing freely eventually writes something that belongs to two
+categories. None of them do. Either the text is canned, in which case 1:1 is a
+schema constraint rather than a quality signal, or it is free text, in which case
+perfect consistency across 49 rows is a **generation signature** — the same one
+F11 exposed.
+
+**If wrong.** If the app offers canned phrases, this is a schema fact and the
+`log_type` column is redundant with `text`. That is worth knowing, not damaging.
+
+**Ask:** does the app present a fixed list of log phrases, or a free-text field?
 
 ---
 

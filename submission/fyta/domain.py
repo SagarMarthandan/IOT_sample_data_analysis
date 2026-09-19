@@ -51,10 +51,26 @@ UNIT_FIXES = {"SENS-07": {"soil_temp_c": "fahrenheit"}}   # F1
 # IMPOSSIBLE -> null it. Outside SPEC but inside IMPOSSIBLE -> flag and keep:
 # the device is not specified to be accurate there, which is not the same as
 # the reading being wrong. Nulling SENS-04's peaks would delete the sawtooth.
+#
+# Two of these bounds are DEFINITIONAL -- arithmetic, not judgement. The other
+# three are physics judgements, and deliberately WIDE: a bound set too narrow
+# nulls real data (destructive, unrecoverable), while one set too wide merely
+# leaves junk flagged (visible, reversible). The impossible ceiling therefore
+# sits 1.25x-12x above the specified one. They are deliberately NOT derived from
+# the data -- a quantile or 3-sigma cut would move with the data, so a
+# fleet-wide fault would shift the bound and hide inside it.
 IMPOSSIBLE = {
-    "soil_moisture_vwc": (0, 100),      # a volume fraction cannot exceed 100
-    "soil_temp_c": (-30, 70),           # checked AFTER the unit fix
-    "ec_us_cm": (0, 20_000),
-    "light_par": (0, 2_500),
-    "air_humidity_pct": (0, 100),       # capped by definition
+    "soil_moisture_vwc": (0, 100),      # definitional: a volume fraction
+    "soil_temp_c": (-30, 70),           # potted soil. Below -30 it is frozen
+                                        # solid, above 70 it would kill the
+                                        # plant. Wide enough for a Berlin
+                                        # winter outdoors. Checked AFTER the
+                                        # unit fix -- before it, SENS-07's
+                                        # 61.9-78.0 F reads as 62-78 C and 982
+                                        # good readings get nulled
+    "ec_us_cm": (0, 20_000),            # ~12x the published ceiling, ~40% of
+                                        # seawater. Real salinity must survive
+    "light_par": (0, 2_500),            # full summer sun is ~2000-2200. 2500
+                                        # is "brighter than the sun"
+    "air_humidity_pct": (0, 100),       # definitional: capped by definition
 }

@@ -32,7 +32,8 @@ submission/
   fyta/                   the logic, split by change reason
     domain.py               assertions; no I/O, no pandas
     sensors.py              Tasks 1-2 — read, detect, findings
-    cleaning.py             Task 3  — two-tier clean + audit gate
+    cleaning.py             Task 3  — two-tier clean + audit gate, and
+                                    the image JSON → flat table
     sources.py              Tasks 4, 6 — source assessment, triangulation
     features.py             Task 5  — the per-plant feature table
     signals.py              Tasks 8, 9 — a derived signal, log text
@@ -47,7 +48,14 @@ submission/
 ## Outputs
 
 `submission/out/`: `cleaned_sensor.csv`, `qc_rejections.csv`,
-`plant_features.csv`, one CSV per analysis section, `figures/`, and `run.log`.
+`images_flattened.csv`, `plant_features.csv`, one CSV per analysis section,
+`figures/`, and `run.log`.
+
+Two time columns, and the difference matters. `timestamp` is the **source text as
+delivered** — mixed format on purpose, because SENS-07 writes DD/MM while the
+rest write ISO — and rewriting it would destroy the evidence that both formats
+coexist. `ts_aligned` is the ISO, uniform, clock-corrected column that every join
+uses.
 
 ## Notes
 

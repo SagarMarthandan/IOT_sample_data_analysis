@@ -124,7 +124,7 @@ Rough infrastructure: **one to four nodes**, ~€150–400/month. Plus an engine
 | Ingest | **IoT Core** → rules → S3 | Device registry, per-device auth and revocation out of the box. Certificates are the hard part of a fleet; don't build them |
 | Messaging cost | **Basic Ingest** (reserved topic `$aws/rules/…`) | **Messaging is free on this path** — you pay rules + actions only. This is the single biggest lever in the design |
 | Buffer (optional) | **Kinesis Data Streams** | Only if you need sub-minute alerting. See below |
-| Lake | **S3**, Parquet, partitioned by event date | Already in use — the image path is `s3://fyta-plant-images/…` |
+| Lake | **S3**, Parquet, partitioned by event date | The assessment's image paths use the `s3://` scheme, which *suggests* S3 — but they are synthetic fixtures and the path is a pure function of other columns. Treat as a hint; confirm the real stack |
 | Transform | **dbt** on **DuckDB/Lambda** or **Athena** | Skip Glue/EMR Spark. 0.6 GB/day does not need a cluster. Only the dbt adapter changes — `dbt-duckdb`, `dbt-athena` |
 | Orchestration | **Step Functions** (or MWAA) | Step Functions is cheaper and needs no one to run it |
 | Serving | **RDS Postgres** | Same schema as Variant A |
@@ -396,7 +396,9 @@ Keep validation as SQL over Parquet — in dbt once a second person needs to rea
 it, in plain scripts until then — with the domain registry in one place and no
 I/O in it.
 
-That is ~$200–500/month and near-zero operational load, on a stack FYTA is
-already using. Revisit it at 1M devices, or the first residency requirement —
+That is ~$200–500/month and near-zero operational load, on a stack FYTA most
+likely already runs — the assessment's image paths use the `s3://` scheme, though
+that is an inference from synthetic fixtures rather than a confirmed fact.
+Revisit it at 1M devices, or the first residency requirement —
 and because the checks were kept portable, revisiting it is a deployment change
 rather than a rewrite.

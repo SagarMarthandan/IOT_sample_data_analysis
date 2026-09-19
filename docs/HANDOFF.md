@@ -3,7 +3,7 @@
 State of the work, written so someone with **no memory of any session** can
 continue. Updated at phase boundaries per `AGENTS.md` §18.
 
-**Last updated:** 2026-09-18 · **Complete.** Tasks 1–9 done, write-up shipped.
+**Last updated:** 2026-09-19 · **Complete and submission-ready.**
 **Deadline:** Monday 21 September 2026, EOD, to gregor@fyta.de
 
 ---
@@ -12,169 +12,111 @@ continue. Updated at phase boundaries per `AGENTS.md` §18.
 
 ```
 FYTA Assessment/
-  AGENTS.md                    engineering rules, binding (484 lines)
+  AGENTS.md                    engineering rules, binding
+  README.md                    how to run it, what the layout is
   data/                        the four source CSVs — NEVER WRITTEN TO
   docs/
     assessment.md              the brief + correspondence (canonical)
-    DATA.md                    what the data is (561)
-    decision_register.md       D1–D13, awaiting conversations (364)
-    observations.md            findings + method + mistakes, for the report (583)
+    DATA.md                    what the data is, incl. the impossible bounds
+    second_opinion.md          two external audits, both acted on
+    observations.md            findings + method + mistakes (report source)
+    decision_register.md       D1–D13, each with an owner
     HANDOFF.md                 this file
-    fyta_..._inventory.md      SUPERSEDED — safe to delete
+    PIPELINE_DESIGN.md         Task 7, both variants
+    diagram_*.md               the prompts used to generate the two diagrams
   submission/
     fyta/                      the logic, split by change reason
-      domain.py                  60  assertions; no I/O, no pandas
-      sensors.py                485  Tasks 1-2: read, detect, findings
-      cleaning.py               131  Task 3: two-tier clean + audit
-      sources.py                 97  Task 4: image model assessment
-      features.py               127  Task 5: the per-plant table
-    fyta_pipeline.py           480  entry point + printed narrative
-    test_gates.py               86  regression checks for the three fixes
-    fyta_analysis.ipynb        38 cells — narrative + rendered output
-    pyproject.toml / uv.lock / requirements.txt
-    out/                       published artifacts + run.log
+      domain.py                  assertions; no I/O, no pandas
+      sensors.py                 Tasks 1–2: read, detect, findings
+      cleaning.py                Task 3: two-tier clean + audit gate
+      sources.py                 Tasks 4, 6: source assessment, triangulation
+      features.py                Task 5: the per-plant feature table
+      signals.py                 Tasks 8, 9: a derived signal, log text
+    fyta_pipeline.py           entry point + printed narrative
+    fyta_analysis.ipynb        the same results, rendered
+    test_gates.py              regression checks for the corrected defects
+    WRITEUP.md / WRITEUP.pdf   the one-page submission note
+    md_to_pdf.py               builds the PDF
+    out/                       11 CSVs, 4 figures, run.log
 ```
 
 **Verified at this boundary:**
 
 ```
-uv run fyta_pipeline.py    exit 0 · no warnings · 545 log lines
-uv run test_gates.py       3 of 3 regression checks pass
-fyta_analysis.ipynb        51 cells · 0 errors · 2 figures · 0 function defs
-data/                      unmodified — proven by multiset comparison
+uv run fyta_pipeline.py    exit 0 · no warnings · 617 log lines
+uv run test_gates.py       4 of 4 regression checks pass
+fyta_analysis.ipynb        52 cells · 0 errors · 2 figures
+WRITEUP.pdf                1 page, A4
+data/                      unmodified — md5 df7b5d41cd79…
 ```
 
-Environment: Python 3.12.12, pandas 2.3.3, numpy 2.4.6, matplotlib 3.11.2.
-**numpy is pinned `<2.5` deliberately** — 2.5 deprecates the generic timedelta
-unit pandas 2.3.3 still uses, so every `pd.Timedelta` warns.
+Environment: Python 3.12.12, pandas 2.3.3, numpy 2.4.6 (**pinned `<2.5`** — 2.5
+deprecates a generic timedelta unit pandas 2.3.3 still uses), matplotlib 3.11.2.
+The PDF needs `uv run --with markdown`; Chrome does the print step.
 
-## 2. Done — Tasks 1, 2, 3
+## 2. Done — all nine tasks
 
-| Task | State |
+| Task | Where |
 |:---|:---|
-| **1 — Ingest & orient** | ✅ §1–5. Load, structure, channels, events, two figures. **Proven non-destructive** |
-| **2 — Data quality** | ✅ §6–7. 10 detectors → 13 findings → detection-coverage table |
-| **3 — Cleaning** | ✅ §8. Two-tier treatment, 12-check audit gate, 1,415 rejections |
-| **4 — Source agreement** | ✅ §9. Four sources, four answers. The image model's independence is unestablished |
-| **5 — Feature table** | ✅ §10. Grain `(user_plant_id, ts_aligned)`, asserted. Probes kept side by side |
-| **6 — Triangulation** | ✅ §11. Negative, for three structural reasons. The window is the trap |
-| **7 — Pipeline design** | ✅ §12. Sketch only. Two variants, one decision rule, both diagrams rendered |
-| **8 — Derived signal** | ✅ §13. `drydown_pct_per_day`. Independently rediscovers SENS-04 / F5 |
-| **9 — Log text** | ✅ §13. A lookup, not a classifier — 14 phrases, mapping already 1:1 |
+| **1 — Ingest & orient** | §1a–1e. Load, structure, channels, events, two figures |
+| **2 — Data quality** | §2a–2c. 11 detectors → 13 findings → detection coverage |
+| **3 — Cleaning** | §3a Clean (sensor) · **§3b Normalize (image JSON → flat)** |
+| **4 — Source agreement** | §4a. Four sources, four answers |
+| **5 — Feature table** | §5a. Grain `(user_plant_id, ts_aligned)`, asserted |
+| **6 — Triangulation** | §6a. Negative, for structural reasons |
+| **7 — Pipeline design** | §7a–7g. Sketch only; both diagrams rendered |
+| **8 — Derived signal** | §8a. `drydown_pct_per_day` |
+| **9 — Log text** | §9a. A lookup, not a classifier |
+| **Write-up** | `submission/WRITEUP.pdf`, one page |
 
-**13 findings (F1–F13).** 4 data problems · 2 sensor faults · 2 unknown ·
-1 artefact · 1 schema · 1 label · 1 semantic · 1 unresolved.
-Full detail: `out/task2_findings.csv`.
-
-**Cleaning output:**
-- `cleaned_sensor.csv` — 15,935 rows. Raw columns + `ts_aligned` + five `_clean` + `qc_flags`
-- `qc_rejections.csv` — 1,415 rows: 1,344 frozen (SENS-06) + 71 impossible
-
-**Cleaning refuses three things:** clip to range · average co-located sensors ·
-fill in the 48.5-hour gap.
+**Outputs:** `cleaned_sensor.csv` · `qc_rejections.csv` · `images_flattened.csv`
+· `plant_features.csv` · `task2_*.csv` (3) · `task4_source_assessment.csv` ·
+`task6_triangulation.csv` · `task8_drydown.csv` · `task9_log_signals.csv` ·
+`figures/` · `run.log`
 
 ## 3. Not done
 
-Nothing. All nine tasks are done and the write-up exists.
-
-`submission/WRITEUP.md` → `submission/WRITEUP.pdf`, **one page**, built by
-`uv run --with markdown python md_to_pdf.py` (markdown → styled HTML →
-headless Chrome print). `WRITEUP.md` is the source; edit that and rebuild.
+Nothing. Every task and the required write-up exist.
 
 ## 4. Decisions taken, and why
 
-Full detail with owners in `docs/decision_register.md`. The load-bearing ones:
+Full list in `docs/decision_register.md`. The load-bearing ones:
 
-**Task 1 reports shape; Task 2 reports violations.** Orientation states what is
-*present*; quality states what is *wrong*. Task 1 reports the contract, Task 2
-the violations. One acknowledged exception: `key_uniqueness` lives in Task 1 and
-reports `unique: False`.
+**Two tiers, because "outside spec" ≠ "provably wrong".** Impossible → null with
+a reason. Outside spec but *possible* → **flag and keep**. Collapsing them starts
+deleting real data. The impossible ceilings are set **1.25×–12× above** the spec
+ceilings, because a too-narrow bound nulls real data while a too-wide one merely
+leaves junk flagged. Derivation per channel is in `docs/DATA.md` §8.
+
+**Never derive a physical bound from the data.** A quantile or 3σ cut moves with
+the data, so a fleet-wide fault would shift the bound and hide inside it.
 
 **Raw is never modified.** Every fix is a new column; the original stays beside
 it. Proven by multiset comparison across all four tables.
 
-**Two tiers, because "outside spec" ≠ "provably wrong".** Physically impossible
-→ empty. Outside the specified range but possible → **flag and keep**. This rule
-was violated once (see §6) and the violation was caught.
+**Two time columns, and the difference matters.** `timestamp` is the **source
+text as delivered** — mixed format on purpose (SENS-07 writes DD/MM), because
+rewriting it destroys the evidence that two formats coexist. `ts_aligned` is the
+ISO, uniform, clock-corrected column that **every join uses**.
 
-**The bar for deleting a value is "physically impossible" — not "implausible".**
-Using the weaker bar would delete real observations, irreversibly.
+**Detection and remediation are separate, reconciled both ways.** The audit gate
+checks rejections↔nulls *and* detector↔flags. Both directions, or a check that
+cannot fail.
 
-**Isolated vs sustained decides the treatment.** A single impossible reading is a
-glitch; a long run is a regime change.
+**The code is six modules, split by change reason.** `domain.py` imports no
+pandas — `AGENTS.md` §7 made structural.
 
-**Detection and remediation are separate and must reconcile.** `detect_unit_outliers()`
-and `UNIT_FIXES` are checked against each other **in both directions**.
+**Task 3 normalizes as well as cleans.** The sensor table needed *cleaning*; the
+image table needed *normalizing* — a JSON blob in one column that no consumer can
+filter, join or aggregate. Both are "turn what was delivered into what can be
+used", so both live under Task 3.
 
-**One file, not modules.** The notebook is already the per-task view; `SPEC` is
-shared across tasks 2 and 3, so splitting would need a fourth file.
+**The pipeline parses `data/fyta_images.csv`; consumers read
+`out/images_flattened.csv`.** Reading back a file the pipeline wrote would make
+it depend on its own history, and a stale copy would go unnoticed.
 
-**Task 4 compares the model against the *cleaned* values, with *raw* as a
-sensitivity column.** The model is what is on trial, so the sensor side must be
-the best estimate of the physical quantity — and raw contains 1,415 values
-already proven not to be measurements. A frozen channel is constant, so it can
-only dilute a correlation: using raw would turn "the sensor is dead" into "the
-model disagrees", which is a spurious negative caused by the input choice.
-
-**Time is held constant across both arms.** The clock offset is proven (F2) and
-not in dispute, so both arms pair on `ts_aligned`. One variable varies, which is
-what makes a gap between the columns attributable rather than ambiguous.
-
-**The code is five modules, split by change reason — not by size.** Sensor
-reading changes when we learn about the hardware; the cleaning policy when we
-decide how to treat a defect; the source assessment when a feed changes; the
-feature table when the modelling team's needs change. `domain.py` holds the
-assertions and imports **no pandas** — `AGENTS.md` §7 made structural. The
-findings table stays in `sensors.py` beside the detectors it cites, so a claim is
-never separated from its evidence (the failure §17 exists to prevent). The split
-was verified by diffing the run log: **byte-identical**.
-
-**The feature table never averages the two probes.** `vwc_delta` carries their
-disagreement instead — 19.9% VWC on UP-1003, 8.8% on UP-1001. Averaging is
-exactly what destroys the fault signal a second probe exists to give.
-
-**`vwc_pct` is ranked over a TRAILING window.** A whole-window rank would judge a
-day-1 reading against day-21 data — leakage the moment the table feeds a model.
-
-## 4b. Second-opinion fixes — what was wrong and what changed
-
-An external review found three correctness defects and several stale claims.
-All were verified before being fixed, and all three fixes now have a regression
-check that fails if reverted (`submission/test_gates.py`).
-
-**The audit gate was tautological.** `cleaning.py` asked *"is there at least one
-null in moisture?"* — satisfied by any null. Restoring all 1,344 frozen SENS-06
-values still passed it, behind prose saying *"nothing publishes unless every check
-passes."* Now reconciles rejections against the cleaned values **both ways**:
-every rejection is null in its column, and every null has a rejection behind it.
-The `== 8` hardcode on the dark-hour check is gone too — the invariant is
-detector↔flag agreement, not a frozen count.
-
-**Run counting was wrong.** `spec_violations` used `n - (bad & bad.shift()).sum()`,
-which counts **runs**, not isolated readings. SENS-04's 431-sample excursion
-reported as 11 "isolated"; it is actually 11 runs, 431 in-run, **0 isolated**.
-`in_runs` was also Σ(L−1) instead of ΣL. Fixed by run-length encoding. The
-corrected numbers make F5 *stronger*: every out-of-spec reading is sustained.
-
-**Triangulation accepted a fall as corroboration.** The brief specifies a *rise*;
-the code used `.abs()`. Fixed to require `d_ec_sigma > 0`. Timing fixed too: the
-offset is now signed hours via `total_seconds()` (`abs(timedelta.days)` truncated,
-so a photo 10.75 h *before* an event read as one day away), bounded to ±48 h, and
-"no image in window" is a distinct state from "the model looked and was silent."
-
-**Numbers with no computation behind them.** F10, F12 and F11's corroborating
-figures were transcribed from one-off analyses — nothing in the code produced
-them. Three detectors added (`colocated_correlation`, `cross_device_correlation`,
-`rise_timing`); the numbers changed where the transcription was wrong:
-F12 light 0.998→0.991, humidity 0.946→0.937, moisture 0.103→0.201; F11
-"35 of 35"→**35 of 37**; F10's second pair +0.140→+0.103.
-
-**Also corrected:** F4's prose claimed the drift is "flagged in qc_flags" — it
-isn't; only 354 of 1,056 drifting rows carry the range flag, from 06-17. The
-sizing figures were **assumed**, not measured: row size 63→**67.9 B**, compression
-~5×→**7.57×** measured. The Task 5 scope is now stated rather than implied. The
-Task 4 circularity claim was reframed — "circular" was wrong, "convergent" is
-unsupported, and the synthetic generator is the reason neither is earned.
+**Task 4 is pure prose — no code cells.** Its working is in `run.log` §4a and
+`out/task4_source_assessment.csv`.
 
 ## 5. Open items — each with an owner
 
@@ -194,76 +136,93 @@ unsupported, and the synthetic generator is the reason neither is earned.
 | D12 | Does a soil-temperature spec exist? | Hardware |
 | D13 | Can a light at that pot be real? | Firmware |
 
-**Four conversations.** D11 blocks Task 5 for two plants.
+**Plus two raised by this work, neither in the register yet:**
+
+| Question | Owner | Why |
+|:---|:---|:---|
+| Did the image model consume VWC, or did one generator emit both series? | Vendor | decides whether `r = 0.75` is corroboration or an artefact |
+| Does the app offer canned log phrases, or free text? | Product | decides whether the 1:1 phrase→type mapping is a schema fact or a generation signature |
+
+**D11 blocks the most.** It closes both F9 (the join fan-out) and F10 (the probes
+that don't correlate) — they are one cause with two symptoms.
 
 ## 6. Corrections made — do not repeat these
 
+Two external audits were run; both were acted on. Every item below was
+reproduced before being fixed.
+
+**From the first audit:**
+
 | Believed | Reality | Caught by |
 |:---|:---|:---|
-| The cadence check resolves the date ambiguity | It does not — a uniform misread still scores 99%. Impossibility is the evidence | Testing it |
-| SENS-07's Fahrenheit evidence looked weak | The **clock offset was contaminating it**. After −2h: 0.444 vs 0.380 control | Re-testing |
-| **Light at night is impossible** | **Wrong.** A person can switch a lamp on | **Your correction** |
-| The dark-hour spikes should be emptied | **Wrong.** 589 is inside the rated 2000 — possible. Flag, don't delete | **Your correction** |
-| "Nine checks" (then "ten") | Eleven detectors now | Reading the output |
-| A detector could apply the clock offset itself | Double-shifted already-aligned data | The audit, twice |
-| `import re` / `from __future__` were used | Dead | ponytail-review |
-| `stuck_channels` was removed | Survived in the notebook; the script had deleted it | A consistency check |
-| Merge on `["id","finding"]` | The two frames label findings differently — all NaN | Reading the output |
-| The raw-vs-clean table covered every channel | It hardcoded 4, missing `light_par` | Your question |
-| A taxonomy chain's last element is its parent | **Wrong.** `nutrient-related issue` groups a head but is never scored — `KeyError` at runtime | Running it |
-| An edit that removed a duplicate line | Added two instead — the tool matched, then matched again | Reading the result, not the success message |
-| The notebook survived a signature change | It didn't; nbconvert aborted and left **stale outputs**, so the first check looked clean | Running the notebook |
-| The context compaction worked | It didn't — the counter was unchanged | **Your screenshot** |
+| The audit gate prevented bad publication | It asked *"is there ≥1 null?"* — any null satisfied it. **1,344 restored frozen values passed** | Mutation testing |
+| `isolated: n - adjacent` counted isolated readings | It counted **runs**. A 431-sample excursion reported as 11 isolated; it is 11 runs, 431 in-run, **0 isolated** | Recomputation |
+| `.abs()` on the EC delta was fine | A large **fall** counted as corroboration of a **rise** | Direction testing |
+| F10/F12/F11's numbers | They were **transcribed**, not computed — no code produced them | Reading the code |
 
-**The pattern:** the audit gate, the ponytail review, and running the code each
-caught things reading did not. Four were mistakes I made minutes earlier.
+**From the second audit:**
+
+| Believed | Reality | Caught by |
+|:---|:---|:---|
+| The gate was fixed | It reconciled **rejections** but not **flags**. Stripping all **736** `outside_spec` flags passed all 13 checks | Mutation testing |
+| The image window was bounded | It was **symmetric**, so a photo 2.5 h *before* an event counted as a response | Fixture |
+| "A dead sensor… one continuous fault" (write-up) | SENS-04 is *unknown*, not dead, and it is 11 runs, longest 44 — errors I introduced while rewriting for plain language | Re-verification |
+| "Soil type, sensor model and plant are code" | All three are already **data** | Reading the data |
+| `log_alignment` tested the plant | It tested `device_id.first()` — **one arbitrary probe** per plant | Your question about F9 |
+| F11 was about watering | **Only one of four log legs was tested** | Your question |
+
+**Process errors, self-inflicted:**
+
+| What | Cost |
+|:---|:---|
+| Sliced `sensors.py` with a boundary *before* the start — duplicated half the file (983 lines) | Caught by inspecting the result |
+| `git checkout HEAD -- sensors.py` to repair it | **Destroyed two pieces of uncommitted work** (`EVIDENCE_NOTES`, the multi-probe fix). Both redone. `git checkout` reverts to the last *commit*, not to "a moment ago" |
+| Rewrote Task 2's evidence section when Task 4 was asked for | Reverted. **Fourth** time an adjacent-but-unrequested change was made |
+| nbconvert aborting on an error **without writing**, leaving the previous run's outputs | Looks like `0 errors`. Has happened **three times**; only caught by reading the outputs |
+
+**The pattern:** the audit, the pomytail review, and *running the code* each
+caught what reading did not. Claims are cheap; a mutation that fails is not.
 
 ## 7. Next actions
 
-1. **Write-up** — required. Distil `observations.md`: 5 findings that matter, the
-   calls I'd defend, what I'd never ship, what needs Gregor's team.
-2. **Tasks 8/9** are implemented in §13 — the optional stretches.
+1. **Commit.** The working tree has uncommitted changes and the last `git checkout`
+   cost two pieces of work. Commit before any further experiment.
+2. **Ship.** Everything else is done. Run kuchiku when ready.
+3. **After the deadline**, if the repo becomes a portfolio piece: decide whether
+   `docs/assessment.md` (Gregor's full email thread) and `docs/second_opinion.md`
+   should stay in it.
 
 ## 8. Unrecoverable if lost
 
 Nothing below is derivable from the CSVs. It exists only in prose.
 
-**The method lessons** (`observations.md` Part 2, ten of them). The three that
+**The method lessons** (`observations.md` Part 2, eleven of them). The four that
 carry the most:
 
 - **Correlation cannot see a unit error.** SENS-07's temperature correlates at
   **0.9843** — the highest in the fleet — while reading Fahrenheit. `y = ax + b`
-  leaves correlation untouched. Correlation detects *timing*, not *scaling*.
+  leaves correlation untouched.
 - **Two problems can hide each other.** The clock offset had to be removed before
   the unit error became clean evidence (sd 1.363 → 0.444). Structural defects
   before semantic ones.
 - **A magnitude check cannot see a context problem.** The light spikes sit inside
   every stated limit. Finding them needed a fourth kind of question — comparing a
-  reading against its *neighbours*, not a constant or the device's own history.
+  reading against its *neighbours*.
+- **A claim tested on one leg is not tested.** F11 was claimed from watering
+  alone. All four log types tested, **none lines up, and light contradicts** —
+  *"moved closer to window"* moves the daily peak **down** (−4.4).
 
 **The corrections record** (§6) — evidence of method, not of success.
 
 **The causality analysis.** The two-sensor issue is the most *interesting*
 problem but causes only 2 of 13 findings; the five worst are on single-sensor
-plants. That rules it out as the root cause, which matters because the fix is not
-one thing.
+plants. That rules it out as the root cause.
 
 **Why flag-vs-empty matters.** A successor reading only the code would likely
 "simplify" the two-tier rule into one threshold — and start deleting real data.
 
 **The four questions that changed the work.** Domain intuition beating statistics
-("a person can turn on a light"), and skepticism about necessity ("is that
-unnecessary?"). Three of the four corrections came from those.
-
-**The independence argument, and why it decides Task 4.** The image model agrees
-with the moisture sensor at r ≈ 0.75. The naive reading is "validated." An early
-draft called it "circular" — also wrong, since two instruments on one latent
-variable *is* corroboration. The defensible reading is narrower than both: the
-model adds nothing beyond water status, and the dataset is **synthetic**, so
-whether even that is independent is unverifiable without lineage from the vendor.
-The numbers support any of the three; only the argument picks between them.
-
-**Why one code path matters here.** `assess_source()` exists so the raw and
-cleaned arms cannot drift. The notebook drifting from the script has now bitten
-three times (`stuck_channels`, `light_par`, the 3-arg call). Keep call sites
-thin.
+("a person can turn on a light"), skepticism about necessity ("is that
+unnecessary?"), and the two that found real defects: *"how can you fix the join if
+the logs have no sensor id?"* and *"doesn't every log type have a channel that
+should respond?"* Both exposed under-tested claims.

@@ -15,7 +15,8 @@ the section within it, so `3a` is the first section of Task 3.
    2a. EVIDENCE      measured evidence per problem         } Task 2
    2b. FINDINGS      what it is, how serious, what kind    }  quality
    2c. DETECTION     what caught it, what is blind to it   }
-   3a. CLEAN         first pass, then the audit gate       } Task 3
+   3a. CLEAN         sensor: two-tier, then the audit gate } Task 3
+   3b. NORMALIZE     image: JSON blob -> flat table        }
    4a. SOURCE        do the four sources agree?            } Task 4
    5a. FEATURES      one time-indexed table per plant      } Task 5
    6a. TRIANGULATION can three sources confirm an event?   } Task 6
@@ -38,6 +39,7 @@ its reader.
 Run:  uv run fyta_pipeline.py
 """
 
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -48,7 +50,8 @@ from fyta.cleaning import audit, clean
 from fyta.domain import CADENCE, CHANNELS, IMPOSSIBLE, SPEC
 from fyta.features import assert_grain, plant_features
 from fyta.sensors import (
-    COVERAGE_COLS, FINDINGS, align_clocks, check_grid, detection_coverage_frame,
+    COVERAGE_COLS, EVIDENCE_NOTES, FINDINGS, align_clocks, check_grid,
+    detection_coverage_frame,
     device_coverage, evidence_tables, findings_frame, frozen_windows,
     key_uniqueness, parse_timestamps, plot_by_device, plot_fleet,
 )
@@ -142,6 +145,10 @@ def main() -> None:
     gaps = device_coverage(sensor, CADENCE)
     for title, frame in evidence_tables(sensor, mapping, contextual, images).items():
         print(f"\n-- {title}")
+        note = EVIDENCE_NOTES.get(title, "")
+        if note:
+            print(textwrap.fill(note, 74, initial_indent="   ",
+                                subsequent_indent="   "))
         print(frame.to_string(index=False))
 
     h("2b. FINDINGS - what it is, how serious, and what kind of problem")
@@ -210,7 +217,10 @@ def main() -> None:
                           not a data fix. Values kept.
     F7 the 48.5h outage  left as a hole. Interpolating would fabricate 193
                           readings that were never taken.
-    F9 fan-out            a schema problem; fixed at the join, not in the data.
+    F9 fan-out            the log carries no device id, so on a two-sensor plant
+                          "the user watered" has no device to attach to. Kept at
+                          plant grain rather than duplicated. D11 decides whether
+                          the fix is the mapping or the log schema.
     F10 two sensors       unresolved. Averaging them would invent a number
                           describing neither pot.
     F11 log mismatch      a label problem. The sensor values are not wrong.
@@ -221,17 +231,42 @@ def main() -> None:
   Not clipped to range, not averaged, not interpolated: all three would have
   manufactured measurements that were never taken.""")
 
-    # ================================================================== TASK 4
-    h("4a. SOURCE - do the four sources agree?")
+    h("3b. NORMALIZE - the image table, JSON blob -> flat")
 
     heads, head_cols, children = image_predictions(images)
-    # The check for the parse above. The first version of the hierarchy took
-    # chain[-1] as the parent, and `nutrient-related issue` is a label on the
-    # taxonomy rather than a class in it -- so it named a parent with no column.
+    # The check for the parse. The first version of the hierarchy took chain[-1]
+    # as the parent, and `nutrient-related issue` is a label on the taxonomy
+    # rather than a class in it -- so it named a parent with no column.
     assert all(p in head_cols for p in children), \
         f"hierarchy names a parent that is not a head: {set(children) - set(head_cols)}"
     assert set(head_cols) >= set(sum(children.values(), [])), \
         "a child is missing from the head columns"
+
+    print(f"  rows in          : {len(images)}   (one JSON blob each)")
+    print(f"  rows out         : {len(heads)}   (one column per head)")
+    print(f"  heads            : {len(head_cols)}")
+    for parent, kids in children.items():
+        print(f"    {parent}  <-  {', '.join(kids)}")
+    heads.to_csv(OUT / "images_flattened.csv", index=False)
+    print("\n  published: images_flattened.csv")
+
+    print("""
+  NORMALIZING, not cleaning. Nothing is removed -- the image table has no values
+  to correct. What it has is a JSON blob in one column, which no consumer can
+  filter, join or aggregate. Flattening it is the same job the sensor table got:
+  turn what was delivered into what can be used.
+
+  The hierarchy is read from each head's own `classification` chain rather than
+  transcribed, so a model version that renames or re-parents a class needs no
+  code edit. `nutrient-related issue` is why: it appears as a classification but
+  is never scored, so it is a label ON the taxonomy, not a class IN it.
+
+  The CSV is for CONSUMERS. The pipeline still parses data/fyta_images.csv
+  directly -- reading back a file this pipeline wrote would make it depend on its
+  own history, and a stale copy would go unnoticed.""")
+
+    # ================================================================== TASK 4
+    h("4a. SOURCE - do the four sources agree?")
 
     # Controlled comparison: the SAME code on two sensor frames. Time is held
     # constant -- the clock offset is proven (F2) and is not in dispute -- so
@@ -254,7 +289,8 @@ def main() -> None:
     print("     checkable against a date?      no - it never changes (F13)")
 
     print("\n-- 2. contextual logs    user-entered")
-    print(f"     one log_type per phrase        {bool(a['log phrase -> one log_type'])}")
+    print(f"     one log_type per phrase        {bool(a['log phrase -> one log_type'])}"
+          f"   -- and that is not a compliment, see below")
     print("     do they line up with sensors?  no - the two were never connected (F11)")
 
     print("\n-- 3. image predictions  model output")
@@ -293,6 +329,13 @@ def main() -> None:
           f"out/task4_source_assessment.csv")
 
     print("""
+  THE LOGS ARE CONSISTENT, AND THAT IS NOT A COMPLIMENT. Fourteen phrases, all
+  single-purpose, and not one of the 49 rows is ambiguous -- no "watered and fed",
+  no "repotted, watered it in". Either the text is canned (a picker in the app),
+  in which case 1:1 is a schema constraint rather than a quality signal; or it is
+  free text, in which case perfect consistency across 49 rows is a generation
+  signature. Either way the tick is not earned, and product can settle it.
+
   Verdict: use the water heads as a FEATURE, never as a LABEL. Their agreement
   cannot settle a disagreement with the sensors, because independence is
   unestablished and the data is synthetic (see F10, still open). What would
@@ -441,7 +484,8 @@ def main() -> None:
     print("wrote out/: run.log, cleaned_sensor.csv, qc_rejections.csv, "
           "task2_findings.csv, task2_coverage_gaps.csv, "
           "task2_detection_coverage.csv, task4_source_assessment.csv, "
-          "plant_features.csv, task6_triangulation.csv, task8_drydown.csv, "
+          "plant_features.csv, task6_triangulation.csv, images_flattened.csv, "
+          "task8_drydown.csv, "
           "task9_log_signals.csv, figures/")
 
 

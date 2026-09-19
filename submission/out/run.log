@@ -59,16 +59,22 @@ air_humidity_pct   15950.0   55.05   13.18   27.50   42.70   55.10   67.30   131
 ==============================================================================
 
 -- declared grain violated
+   rows sharing a key. Identical payloads are a redelivery; differing ones
+   are unorderable. Both kept.
  rows_with_a_twin  superfluous  conflicting
                30           15            0
 
 -- joins that multiply rows
+   row count before and after joining each table to the mapping. A rise
+   means the join key is not unique on the right.
 fact_table       join_on  before  after  fans_out
 contextual user_plant_id      49     67      True
     images user_plant_id      28     35      True
     sensor     device_id   15950  15950     False
 
 -- coverage against the grid
+   every slot each device was due, as delivered / missing / surplus. Row
+   counts hide a device that is half-present.
  device  slots_due  delivered  missing  surplus  completeness  gaps     longest_gap
 SENS-01       2016       2016        0        0        1.0000     0 0 days 00:15:00
 SENS-02       2016       2016        0        0        1.0000     0 0 days 00:15:00
@@ -80,6 +86,8 @@ SENS-07       2016       2016        0        0        1.0000     0 0 days 00:15
 SENS-08       2016       2016        0       15        1.0000     0 0 days 00:15:00
 
 -- outside published range
+   readings outside the spec. `runs` = separate stretches; `isolated` = a
+   stretch of one; `in_runs` = inside a stretch of 2+.
  device           channel  n_bad  pct  runs  isolated  in_runs  longest_run    min     max
 SENS-04 soil_moisture_vwc    431 21.4    11         0      431           44  15.07  107.12
 SENS-08 soil_moisture_vwc     12  0.6    12        12        0            1  -5.43   39.59
@@ -87,6 +95,8 @@ SENS-03          ec_us_cm    354 17.6    17         8      346          307 561.
 SENS-08  air_humidity_pct     10  0.5    10        10        0            1  27.50  131.00
 
 -- dark-hour light spikes
+   a light reading at night its own neighbours cannot explain. Flagged,
+   not deleted -- a lamp would be a real observation.
  device                  ts   channel  value neighbours
 SENS-08 2026-06-06 01:00:00 light_par  429.6  0.0 / 0.0
 SENS-08 2026-06-06 02:15:00 light_par  554.2  0.0 / 0.0
@@ -98,10 +108,14 @@ SENS-08 2026-06-21 00:15:00 light_par  564.8  0.0 / 0.0
 SENS-08 2026-06-21 01:15:00 light_par  507.2  0.0 / 0.0
 
 -- frozen channels
+   runs of an unchanged value long enough to be a dead channel. Only a
+   fault if the device's OTHER channels keep moving.
  device           channel  samples  frozen_at      first                last
 SENS-06 soil_moisture_vwc     1344      25.01 2026-06-08 2026-06-21 23:45:00
 
 -- clock offsets
+   each device's clock, from sliding its daylight curve against the
+   fleet's. Correlation at zero shift vs at the best shift.
  device  offset_h  corr_at_zero  corr_when_aligned
 SENS-01         0        0.9996             0.9996
 SENS-02         0        0.9996             0.9996
@@ -113,6 +127,8 @@ SENS-07         2        0.8024             0.9997
 SENS-08         0        0.9926             0.9926
 
 -- temperature unit scale
+   how much each device's temperature jitters. A unit change scales jitter
+   by 1.8, which correlation cannot see.
  device  median_abs_delta  ratio_vs_fleet
 SENS-01              0.40            1.01
 SENS-02              0.40            1.01
@@ -124,6 +140,8 @@ SENS-07              0.72            1.82
 SENS-08              0.39            0.99
 
 -- drift vs own history (top 6 of 40)
+   channels whose recent level has left their own band, ranked against
+   that channel's own noise rather than the fleet's.
  device           channel  early   late  shift  shift_vs_own_noise
 SENS-03          ec_us_cm  702.1 1722.8 1020.8                10.8
 SENS-02 soil_moisture_vwc   26.4   38.3   11.9                 4.5
@@ -133,19 +151,24 @@ SENS-03         light_par  103.0  102.6   -0.4                 1.5
 SENS-03 soil_moisture_vwc   28.3   34.8    6.4                 1.4
 
 -- watering logs vs sensor
-  plant  device  watering_logs  with_sensor_rise
-UP-1001 SENS-01              6                 0
-UP-1002 SENS-03              5                 1
-UP-1003 SENS-04              6                 0
-UP-1004 SENS-05              6                 0
-UP-1005 SENS-07              6                 1
-UP-1006 SENS-08              5                 0
+   for each log type, does the channel its own event should move, move?
+   F11 was first claimed from the watering leg alone.
+   log_type                          phrase  logs  tested  responded                expected  mean_shift
+   watering                           (all)    34      45          3 soil_moisture_vwc rises         NaN
+fertilising                           (all)     5       8          0          ec_us_cm rises         NaN
+      light          Moved closer to window     2       3          0    light_par peak rises        -4.4
+      light Too much direct sun, moved back     2       2          0    light_par peak falls        -3.3
+  repotting                           (all)     3       3          1      some channel steps         NaN
 
 -- EC drift fit
+   where a device's EC starts climbing, and how fast. The onset must be
+   found first -- a whole-record fit halves the rate.
  device               onset  ramp_per_day     r2  whole_record_per_day
 SENS-03 2026-06-11 19:45:00         136.0 0.9902                  72.7
 
 -- cross-device correlation
+   mean pairwise r between devices, per channel. High = one shared ambient
+   signal, so 'differs from the fleet' is not a usable test there.
           channel  mean_pairwise_r
 soil_moisture_vwc            0.201
       soil_temp_c            0.974
@@ -154,11 +177,15 @@ soil_moisture_vwc            0.201
  air_humidity_pct            0.937
 
 -- co-located probes, same plant
+   two probes on one plant share a reservoir, so they must move together.
+   A near-zero r means they do not.
   plant       a       b    n      r
 UP-1001 SENS-01 SENS-02 2016 -0.076
 UP-1003 SENS-04 SENS-06 2016  0.103
 
 -- where a moisture rise lands
+   the minute each rise falls on. A real watering does not care what
+   minute it is; rises on :00 are a scheduler.
  device  rises  on_the_hour
 SENS-01      4            4
 SENS-02      4            4
@@ -170,6 +197,8 @@ SENS-07      6            6
 SENS-08     16           10
 
 -- moisture jitter by device
+   median change between consecutive readings. A noisy or wrongly-scaled
+   channel shows up as a ratio against the fleet.
  device  median_abs_delta  ratio_vs_fleet
 SENS-01              0.14            0.97
 SENS-02              0.15            1.03
@@ -235,7 +264,7 @@ F10  Two plants have two sensors, and the pairs do not correlate   [UP-1001, UP-
     next     : ask product whether the app allows two sensors per plant; do not average
 
 F11  Watering logs and sensor events are unrelated   [all plants]
-    detected : 32 of 34 watering logs have no moisture rise within 6h. The sensor's own rises land exactly on the hour -- 35 of 37 excluding SENS-08 -- while the logs are all at human times, so the two look independently generated
+    detected : 31 of 34 watering logs have no moisture rise within 6h -- and 3 hits is below the ~3.5 expected by chance, so the matches carry no information. All four log types were tested against the channel their own event should move, and none lines up. LIGHT CONTRADICTS: 'Moved closer to window' moves the daily light peak DOWN by 4.4 on average, the opposite of what it claims (n=3, within the daily sd of 5.3 -- suggestive, not proof). The sensor's own rises land exactly on the hour -- 35 of 37 excluding SENS-08 -- while the logs are all at human times, so the two look independently generated
     severity : high    class: label problem
     next     : do not use logs as event ground truth; ask firmware whether the device does anything at 00:00
 
@@ -370,7 +399,10 @@ soil_moisture_vwc: outside_spec flags match the detector    True 382 detected --
                           not a data fix. Values kept.
     F7 the 48.5h outage  left as a hole. Interpolating would fabricate 193
                           readings that were never taken.
-    F9 fan-out            a schema problem; fixed at the join, not in the data.
+    F9 fan-out            the log carries no device id, so on a two-sensor plant
+                          "the user watered" has no device to attach to. Kept at
+                          plant grain rather than duplicated. D11 decides whether
+                          the fix is the mapping or the log schema.
     F10 two sensors       unresolved. Averaging them would invent a number
                           describing neither pot.
     F11 log mismatch      a label problem. The sensor values are not wrong.
@@ -382,6 +414,31 @@ soil_moisture_vwc: outside_spec flags match the detector    True 382 detected --
   manufactured measurements that were never taken.
 
 ==============================================================================
+3b. NORMALIZE - the image table, JSON blob -> flat
+==============================================================================
+  rows in          : 28   (one JSON blob each)
+  rows out         : 28   (one column per head)
+  heads            : 7
+    Abiotic  <-  Nutrient deficiency, Water-related issue
+    Water-related issue  <-  Water deficiency, Water excess and/or uneven watering
+
+  published: images_flattened.csv
+
+  NORMALIZING, not cleaning. Nothing is removed -- the image table has no values
+  to correct. What it has is a JSON blob in one column, which no consumer can
+  filter, join or aggregate. Flattening it is the same job the sensor table got:
+  turn what was delivered into what can be used.
+
+  The hierarchy is read from each head's own `classification` chain rather than
+  transcribed, so a model version that renames or re-parents a class needs no
+  code edit. `nutrient-related issue` is why: it appears as a classification but
+  is never scored, so it is a label ON the taxonomy, not a class IN it.
+
+  The CSV is for CONSUMERS. The pipeline still parses data/fyta_images.csv
+  directly -- reading back a file this pipeline wrote would make it depend on its
+  own history, and a stale copy would go unnoticed.
+
+==============================================================================
 4a. SOURCE - do the four sources agree?
 ==============================================================================
 -- 1. plant species      static label, no timestamps
@@ -389,7 +446,7 @@ soil_moisture_vwc: outside_spec flags match the detector    True 382 detected --
      checkable against a date?      no - it never changes (F13)
 
 -- 2. contextual logs    user-entered
-     one log_type per phrase        True
+     one log_type per phrase        True   -- and that is not a compliment, see below
      do they line up with sensors?  no - the two were never connected (F11)
 
 -- 3. image predictions  model output
@@ -416,6 +473,13 @@ image predictions       28 model output yes on water - independence unestablishe
 
   Raw vs cleaned: every metric is identical except the r() rows (max move 0.056).
   The answer does not depend on Task 3's choices. Full table: out/task4_source_assessment.csv
+
+  THE LOGS ARE CONSISTENT, AND THAT IS NOT A COMPLIMENT. Fourteen phrases, all
+  single-purpose, and not one of the 49 rows is ambiguous -- no "watered and fed",
+  no "repotted, watered it in". Either the text is canned (a picker in the app),
+  in which case 1:1 is a schema constraint rather than a quality signal; or it is
+  free text, in which case perfect consistency across 49 rows is a generation
+  signature. Either way the tick is not earned, and product can settle it.
 
   Verdict: use the water heads as a FEATURE, never as a LABEL. Their agreement
   cannot settle a disagreement with the sensors, because independence is
@@ -550,4 +614,4 @@ watering                 Watered ~200ml          2  5  200.0
   the sensors in time, so a cleaner log is still not a timestamped event.
 
 self-check passed: every device on the 15-minute grid; day-first parse proven by impossibility
-wrote out/: run.log, cleaned_sensor.csv, qc_rejections.csv, task2_findings.csv, task2_coverage_gaps.csv, task2_detection_coverage.csv, task4_source_assessment.csv, plant_features.csv, task6_triangulation.csv, task8_drydown.csv, task9_log_signals.csv, figures/
+wrote out/: run.log, cleaned_sensor.csv, qc_rejections.csv, task2_findings.csv, task2_coverage_gaps.csv, task2_detection_coverage.csv, task4_source_assessment.csv, plant_features.csv, task6_triangulation.csv, images_flattened.csv, task8_drydown.csv, task9_log_signals.csv, figures/
