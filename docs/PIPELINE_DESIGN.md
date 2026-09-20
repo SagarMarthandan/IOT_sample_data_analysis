@@ -1,17 +1,14 @@
 # Task 7 — Pipeline design for 100,000+ devices
 
-*"How would you productionize this as an ingestion + quality pipeline? What would
-you monitor, where would bad data get caught, and how would you make the checks
-maintainable as new substrates and sensors appear?"*
-
-Two variants, one decision rule, and the numbers behind both. Vendor rates are
-AWS published list, us-east-1, read 2026-09-18 — re-check before quoting.
+This note recommends a production ingestion and quality pipeline for 100,000+
+devices. Vendor rates are AWS published list, us-east-1, read 2026-09-18 —
+re-check before quoting.
 
 ---
 
 ## 1. First, size it
 
-Everything below follows from this table, so it goes first.
+The size determines the processing choices.
 
 | | |
 |:---|:---|
@@ -24,23 +21,12 @@ Everything below follows from this table, so it goes first.
 | Parquet + zstd (measured **7.6×**) | **0.086 GB/day · 31 GB/year** |
 | Published table, raw + cleaned side by side | 119 B/row · 0.17 GB/day compressed |
 
-The published table is ~2× the arrival volume, because it keeps the raw column
-beside every cleaned one. That is the price of never destroying the original, and
-at this scale it is still nothing. All figures measured from the shipped sample;
-the compression ratio is a real Parquet+zstd write, not an estimate.
+Published raw+cleaned output is ~2× arrival volume. Figures use the shipped
+sample; the compression ratio is a Parquet+zstd write.
 
-**This is not big data.** 111 msg/s is a single process. 238 GB/year fits on a
-laptop. Any architecture that leads with Spark, a data mesh, or "web-scale
-streaming" is solving a problem this fleet does not have.
-
-The real difficulties are elsewhere, and they are the ones this assessment is
-about:
-
-1. **100,000 things that can each be individually wrong** — a fleet average looks
-   perfect while 300 devices are dead
-2. **Data arrives late and out of order** (see §2)
-3. **The semantics are hard** — substrate curves, unit errors, drift, artefacts
-   vs signal. The checks are the product, not the plumbing
+**This is not big data.** 111 msg/s is a single process and 238 GB/year fits on
+a laptop. The fleet risks are individual device failures, late or out-of-order
+data, and substrate, unit, drift, and artefact semantics.
 
 ## 2. The constraint that actually shapes it
 
@@ -50,23 +36,22 @@ relayed: phone app or hub. Two consequences that decide the whole design:
 **Uploads are bursty and human-scheduled.** The app syncs when the phone is open
 and online. A phone offline for three days delivers three days at once.
 
-**The buffer bounds the lateness.** ~320 measurements per device. **If the
-deployed generation buffers 320 readings at four per hour**, that is **up to ~80
-hours late** — but the published figures are ambiguous: Beam 1.0 is listed at
-1/hour and Beam 2.0 at 4/hour, and the 320-reading store is described as ~13 days,
-which matches 1/hour. The watermark below is therefore conditional. **Confirm
-generation-specific storage with firmware** (D2/D6). So:
+**The buffer caps device-side backlog; it does not bound end-to-end arrival.**
+~320 measurements per device, so a device that cannot reach a phone keeps at most
+**~80 hours** of readings before it starts dropping the oldest — *if* the deployed
+generation buffers 320 readings at four per hour. The published figures are
+ambiguous: Beam 1.0 is listed at 1/hour and Beam 2.0 at 4/hour, and the 320-reading
+store is described as ~13 days, which matches 1/hour. Confirm generation-specific
+storage with firmware (D2/D6).
 
-> **Partition by event time, not arrival time.** An 80-hour watermark is normal,
-> not exceptional. Late writes must replay and re-audit the *affected* partition,
-> not just append to today's.
+The delay from a reading to its arrival is set by when the phone next syncs, and
+that is a human schedule rather than a device limit: a phone offline for a week
+delivers a week at once — minus whatever the buffer already discarded. Retention
+therefore bounds *loss*, not latency, and the watermark below is conditional on
+both. So:
 
-This is the single constraint most likely to be got wrong, and it comes straight
-from the hardware spec rather than from the data volume.
-
-It is also the strongest argument for dbt (§12): `is_incremental()` with a
-`unique_key` compiles to a `MERGE`, which is exactly the upsert a late partition
-needs. Hand-written, that logic is a test-free liability.
+Partition by event time, not arrival time. An 80-hour watermark is normal. Late
+writes must replay and re-audit the affected partition.
 
 ## 3. The shape, in both variants
 
@@ -96,24 +81,35 @@ needs. Hand-written, that logic is a test-free liability.
         dashboards / alerting   model + calibration training
 ```
 
-Both variants are this shape. They differ only in **what each box is made of**,
-and that is a build-vs-buy question, not an architecture question.
+The variants use this flow with different infrastructure.
+
+### Failure handling
+
+- Retry transient transport and write failures idempotently on `(device_id, ts)`;
+  duplicate-key checks make replay safe.
+- Quarantine payloads that fail authentication, schema parsing, or range checks
+  with the reason and raw payload retained for replay.
+- If validation or publication fails for a device-day, leave that partition
+  unpublished and replay its immutable raw input after recovery.
 
 ## 4. Variant A — self-hosted / OSS
 
-| Concern | Choice | Why this and not the obvious one |
-|:---|:---|:---|
-| Ingest buffer | **Redpanda** | Kafka API in one binary. No ZooKeeper, no JVM tuning. Kafka's own ops are the cost here, not its throughput |
-| Stream checks | **a Python consumer** | Per-*message* checks only — reject at ingest. A loop, not complex event processing; Flink or Spark Streaming would be a second system to operate for 111 msg/s. The per-*window* checks are SQL and belong in dbt (§12) |
-| Lake | **MinIO + Parquet** | S3 API, so the code is portable to AWS later. This is the whole point of MinIO |
-| Transform | **DuckDB + dbt** (`dbt-duckdb`) | 0.6 GB/day in a columnar file. DuckDB reads Parquet faster than a warehouse cluster starts up; dbt is the layer above it — models, tests, lineage (§12) |
-| Orchestration | **Airflow** | Ubiquitous, so new hires already know it. Dagster is nicer and less known |
-| Serving | **Postgres (+ TimescaleDB)** | The per-plant feature table is 12k rows here, ~150M at fleet scale. Still Postgres |
-| Dashboards | **Grafana** | Same tool for infra and data freshness |
-| Analytics | **Metabase** | Non-technical users, self-serve, no SQL needed |
-| Deploy | **Docker Compose → k8s when it hurts** | Compose on one box until it doesn't fit. It won't fit at ~10× |
-| Ops agent | **a small on-box watchdog** | Restarts, log tailing, disk pressure, certificate expiry — the things that page someone at 3am. And the first component to delete when moving to Variant B, because managed services absorb exactly this job |
-| Model lifecycle | **MLflow** | Calibration curves are models (§10) |
+| Concern | Choice |
+|:---|:---|
+| Ingest buffer | **Redpanda** |
+| Stream checks | **a Python consumer** for per-message checks; dbt (§12) for per-window SQL |
+| Lake | **MinIO + Parquet** |
+| Transform | **DuckDB + dbt** (`dbt-duckdb`); 0.6 GB/day in a columnar file |
+| Orchestration | **Airflow** |
+| Serving | **Postgres (+ TimescaleDB)**; the feature table is 12k rows here, ~150M at fleet scale |
+| Dashboards / analytics | **Grafana** / **Metabase** |
+| Deploy / operations | **Docker Compose → k8s when it hurts**; a small on-box watchdog |
+| Model lifecycle | **MLflow** |
+
+Redpanda retains the Kafka API without ZooKeeper/JVM; the Python consumer avoids
+Flink, Spark Streaming, and Kafka operations. MinIO's S3 API supports AWS
+portability. Airflow over Dagster; the watchdog handles restarts, log tailing,
+disk pressure, certificate expiry, and pages someone at 3am; move to k8s at ~10×.
 
 Rough infrastructure: **one to four nodes**, ~€150–400/month. Plus an engineer.
 
@@ -144,68 +140,72 @@ S3, raw 18 GB/mo                                                  $0.41/mo
 S3, compressed ~4 GB/mo                                           $0.09/mo
 ```
 
-**The line that decides this estimate is PUT requests, and the first draft of it
-was missing.** AWS's S3 rule action writes an MQTT message into an object; it does
-not batch. So the object count is a design decision, not a detail:
+S3 rule actions write individual MQTT messages, so the object count is a design
+decision:
 
 ```
-one object per message     288,000,000 ÷ 1,000 × $0.005 = $1,440/mo   ← exceeds the estimate
-one object per device/hour  72,000,000 ÷ 1,000 × $0.005 = $  360/mo
-one object per device/day    3,000,000 ÷ 1,000 × $0.005 = $   15/mo
+one object per message      288,000,000 ÷ 1,000 × $0.005 = $1,440/mo
+one object per device/hour   72,000,000 ÷ 1,000 × $0.005 = $  360/mo
+one object per device/day     3,000,000 ÷ 1,000 × $0.005 = $   15/mo   ← chosen
 ```
 
-At one object per reading, **request cost alone is 3× the whole storage estimate
-and larger than the $200–500 envelope** — before reads, transforms or serving. A
-static object key overwrites data instead of accumulating it, so "just use one
-key" is not a fix either.
+**Chosen: one compacted Parquet object per device per day.** An hourly object at
+this cadence holds four readings, so it pays 24× the request cost to put four rows
+in a file; it buys nothing the serving tier does not already provide. The total,
+with that policy:
 
-**So batching is a requirement, not an optimisation.** Buffer at the gateway or
-in an ingestion buffer and land one compacted Parquet object per device per hour
-at most. The written object should be Parquet, not the raw message: a bucket of
-288 M tiny JSON objects is a listing-and-scan problem long before it is a cost
-problem.
+```
+IoT Core (connectivity + rules)                                $173–432/mo
+S3 requests, 3 M PUTs at one object per device-day             $     15/mo
+S3 storage (compressed published + raw, both retained)         $   0.50/mo
+                                                        total ≈ $188–447/mo
+```
+
+**What that policy costs in latency, stated plainly:** the lake is up to **one
+day** behind the last reading of a completed UTC day, plus the upload delay of §2.
+So the lake does not serve anything that must react within hours — and that is why
+the gates do not run there. The per-device-window checks (layer 4 of §7) run
+**hourly in the ingestion consumer, over the buffer**, and the serving table is
+refreshed by the same hourly pass. The daily lake object is validated as it is
+written, and a late reading rewrites the affected device-day object.
+
+A static object key overwrites data. **Fresh lake files** require hourly objects:
+**$360/mo** of requests, total **≈$533–792/mo**, above the $200–500 envelope.
+**Batching is required:** Parquet avoids a listing-and-scan problem from 288 M
+tiny JSON objects.
 
 Sources: [AWS IoT S3 rule action](https://docs.aws.amazon.com/iot/latest/developerguide/s3-rule-action.html) ·
 [S3 pricing](https://aws.amazon.com/s3/pricing/).
 
-**The pipeline is not the cost driver — the connection model is.** Keeping 100k
-devices connected 24/7 costs $346/month; connecting only to send costs $86. And a
-BLE sensor relayed by a phone may never hold an IoT Core connection at all.
+The connection model drives cost: 100k devices connected 24/7 cost $346/month;
+connecting only to send costs $86. A phone-relayed BLE sensor may not hold an IoT
+Core connection.
 
-### And the option that needs no broker
+### Brokerless option
 
-If readings only need to reach a dashboard in **minutes, not seconds**, skip the
-stream tier entirely:
+For dashboards needing **minutes, not seconds**, use:
 
 ```
 IoT Core rule → ingestion buffer (batches + compacts) → S3 Parquet → validation
 ```
 
-**The buffer is not optional here** — it is what turns 288 M objects into 3 M (see
-the PUT line above, $1,440/mo versus $15/mo). At 0.6 GB/day that is a few seconds
-of DuckDB. A broker earns its place when
-something must react *per message* — live alerting, or a device command. Until
-then it is a system to operate for no benefit. **Start here; add Kinesis when a
-requirement actually needs it.**
+The buffer turns 288 M objects into 3 M ($1,440/mo versus $15/mo). At 0.6 GB/day,
+DuckDB needs a few seconds. Add Kinesis for live alerting or a device command.
 
 ## 6. The decision rule
 
-**Volume does not decide this.** 0.6 GB/day runs on a laptop, so the choice
-between Variant A and Variant B is not technical capacity, it is **total cost of
-ownership**:
+The choice is total cost of ownership:
 
 | | Variant A | Variant B |
 |:---|:---|:---|
-| Infrastructure | €150–400/mo | ~$200–500/mo |
+| Infrastructure | €150–400/mo | ~$190–450/mo (§5 policy) |
 | **Operational load** | Kafka + Airflow + MinIO + Grafana to patch, upgrade and be paged for — **~0.3–0.5 FTE** | ~0.05 FTE |
 | Lock-in | none | IoT Core rules, Kinesis, QuickSight are sticky |
 | Marginal cost at 10× | unchanged | scales linearly |
 
-At a loaded engineer cost of ~€7,000/month, **0.3 FTE is ~€2,100/month**. That is
-10–20× the infrastructure difference. So:
-
-> **Managed wins, and it is not close — because the scarce resource is the
-> engineer, not the euro.**
+The FTE estimate is a ratio, not a currency figure: a third of someone's time is
+**10–20× the whole infrastructure difference**. I would start with managed
+ingestion, the §5 batching policy, and portable checks.
 
 **Flip to Variant A when:**
 
@@ -217,18 +217,13 @@ At a loaded engineer cost of ~€7,000/month, **0.3 FTE is ~€2,100/month**. Th
    lower than 0.3 FTE, and the calculus changes
 4. **Egress or vendor repricing.** AWS changed IoT Core pricing once already
 
-And the point that makes the two not really rivals:
-
-> **Keep the checks portable and the substrate becomes a deployment detail.**
-> The validation logic is Python and SQL over Parquet. It runs on MinIO + DuckDB
-> exactly as it runs on S3 + Athena. Design the exit on day one, so the decision
-> above can be revisited cheaply rather than re-litigated.
+Keep validation logic portable: Python and SQL over Parquet run on MinIO + DuckDB
+and S3 + Athena. This makes a later substrate change a deployment change rather
+than a rewrite.
 
 ## 7. Where bad data gets caught
 
-Six layers, cheapest first. A check belongs in the earliest layer that can hold
-it — the firmware rejecting an impossible reading costs nothing; the same reading
-caught after it has been written, replicated and indexed costs a pipeline.
+Six layers, cheapest first.
 
 | # | Layer | Catches | Failure mode if missing |
 |:---|:---|:---|:---|
@@ -239,9 +234,7 @@ caught after it has been written, replicated and indexed costs a pipeline.
 | 5 | **Publish gate** | nothing reaches a consumer unless every check passed | a consumer reads half-verified data |
 | 6 | **Post-publish monitoring** | what the gates missed — freshness, volume, distribution | you find out from a model, weeks later |
 
-**Layer 4 is where this assessment's findings live**, and it is where the effort
-belongs. Every one of the 13 findings is a per-device-window question that a
-per-row check cannot see:
+Layer 4 contains the 13 per-device-window findings that per-row checks miss:
 
 | Finding | Blind to it |
 |:---|:---|
@@ -251,7 +244,7 @@ per-row check cannot see:
 | F5 sustained out-of-spec | each reading is individually possible |
 | F12 shared ambient | the reading is correct; the *comparison* was the error |
 
-**Rules that keep the gates honest**
+Rules:
 
 - **Parse strictly.** Match an explicit registry; fail loudly on the unknown with
   the offending rows named. `errors="coerce"` turns a schema change into silent
@@ -284,8 +277,7 @@ thresholds to raise and to clear**.
 
 ## 9. Making the checks maintainable
 
-This is the part that decays, and the brief asks about it directly. Four
-mechanisms, in order of importance.
+Four maintenance mechanisms:
 
 **1. One declarative registry — domain knowledge, no I/O.**
 
@@ -302,20 +294,8 @@ depends on domain knowledge, never the reverse.
 
 **2. Every check declares what it is blind to.**
 
-This is the mechanism that actually keeps coverage honest, and it is already in
-this submission as `task2_detection_coverage.csv`. Each finding carries the check
-that caught it *and* the obvious check that is structurally blind to it:
-
-| Finding | Caught by | Blind because |
-|:---|:---|:---|
-| F2 clock offset | cross-device daylight correlation | every timestamp is well-formed |
-| F3 frozen channel | run-length + cross-channel | every value is in range |
-| F7 the hole | expected-slot grid | there are no nulls to find |
-| F8 duplicates | key cardinality | the payloads are identical |
-
-Without this table, adding checks creates the *feeling* of coverage. With it,
-the gap is visible, so the next check is aimed at a real blind spot rather than
-at another angle on something already covered.
+`task2_detection_coverage.csv` records the check that caught each finding and
+the check structurally blind to it:
 
 **3. Detection ≠ remediation, reconciled both ways.**
 
@@ -324,19 +304,13 @@ for device in detect_unit_outliers(raw):  assert device in UNIT_FIXES
 for device in UNIT_FIXES:                 assert device in detect_unit_outliers(raw)
 ```
 
-A fix with no detector silently rots; a detector with no fix is a warning nobody
-acts on. The pair is the unit of maintenance.
-
-**4. Regression fixtures.**
-
-A frozen copy of a known-bad window per failure class, replayed on every change,
-asserting each is still caught. Cheap, and it is the only thing that stops a
-refactor from quietly removing coverage. (This is the same job as `assert_grain`
-and the audit gate in the current code, scaled up.)
+Each known failure class has a frozen bad-window fixture that must remain caught
+after a change. `assert_grain` and the audit gate provide this pattern in the
+current code.
 
 ## 10. Model and calibration lifecycle
 
-The thing most likely to be forgotten, and it is already a finding here.
+Calibration is already a finding:
 
 **`soil_moisture_vwc` is not a measurement — it is a model output.** Dielectric
 permittivity through a **substrate-specific conversion curve**. So every VWC value
@@ -368,10 +342,8 @@ The design forks on these, and none can be answered from the data.
 
 ## 12. dbt — the transform layer
 
-Both variants name dbt in their Transform row. It earns a section of its own,
-because the first draft of this design left it out and that was wrong. The test is
-simple: **map each operation in the cleaning code to the thing that expresses
-it.**
+dbt is the transform layer in both variants; the adapter changes. The operation
+mapping is:
 
 | Operation | Expressed as |
 |:---|:---|
@@ -386,25 +358,14 @@ it.**
 | correlation, affine fit | `corr()`, `regr_slope()` |
 
 **14 of the 15 operations in this submission are expressible in SQL.** The
-Python is a choice, not a constraint — so the transform layer belongs in dbt, and
-it belongs there in *both* variants, because only the adapter changes.
+equivalents include `assert_grain()` as `unique: [device_id, ts]`, `SPEC` /
+`IMPOSSIBLE` range tests, audit test groups, `relationships: device_id → registry`,
+the registry table as a seed, `is_incremental()` + `unique_key` → `MERGE`, and
+lineage and docs output.
 
-**What it adds over the Python:**
-
-| In this submission | As a dbt construct |
-|:---|:---|
-| `assert_grain()` | `unique: [device_id, ts]` — a test, not a function |
-| `SPEC` / `IMPOSSIBLE` ranges | `accepted_values`, or a custom range test |
-| the audit gate's 12 checks | a test group that must pass before publish |
-| registry integrity | `relationships: device_id → registry` |
-| **the registry table** | **a seed** — "a new substrate is a data change, not a deploy", literally |
-| the late-arrival upsert | `is_incremental()` + `unique_key` → `MERGE` |
-| lineage and docs | an output, not an artefact to maintain |
-
-**Where it is NOT the answer.** dbt runs on a warehouse or a lake; it does not
-run inside a broker consumer. Per-message checks — reject at ingest, live
-alerting — stay in Python. The boundary is clean: **per-message in the consumer,
-per-window in dbt.**
+**Where it is not the answer.** dbt runs on a warehouse or a lake, not inside a
+broker consumer. Per-message checks such as reject-at-ingest and live alerting
+stay in Python; dbt handles per-window work.
 
 **The cost, stated honestly.** dbt means a second execution model, a
 `profiles.yml`, and a project layout beside 1,100 lines of working Python. At one
@@ -416,15 +377,11 @@ transforms — which at 100k devices is a matter of when, not if.
 
 ## Recommendation
 
-**Build Variant B, but write it so Variant A stays cheap.** IoT Core + S3 +
-DuckDB, no broker until a requirement needs one, orchestration in Step Functions.
-Keep validation as SQL over Parquet — in dbt once a second person needs to read
-it, in plain scripts until then — with the domain registry in one place and no
-I/O in it.
+Build Variant B while keeping Variant A portable: IoT Core + S3 + DuckDB, no
+broker until required, and Step Functions orchestration. Keep validation as SQL
+over Parquet in dbt when a second person needs to read it; use plain scripts until
+then. Keep the domain registry in one place with no I/O.
 
-That is ~$200–500/month and near-zero operational load, on a stack FYTA most
-likely already runs — the assessment's image paths use the `s3://` scheme, though
-that is an inference from synthetic fixtures rather than a confirmed fact.
-Revisit it at 1M devices, or the first residency requirement —
-and because the checks were kept portable, revisiting it is a deployment change
-rather than a rewrite.
+The §5 batching policy costs **≈$190–450/month** with near-zero operational load.
+The `s3://` image paths suggest FYTA may already use AWS, but they are synthetic
+fixtures. Revisit the choice at 1M devices or the first residency requirement.

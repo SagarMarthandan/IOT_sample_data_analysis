@@ -2,17 +2,21 @@
 
     uv run test_gates.py
 
-No framework -- one function per defect, each one FAILING if its fix is
+No framework -- one function per defect, each one failing if its fix is
 reverted. They exist because `assert` inside the pipeline disappears under
 `python -O`, and because the audit gate's original check was tautological: it
 could approve the exact defect it claimed to prevent.
 """
 
+import json
+
 import pandas as pd
 
 from fyta.cleaning import audit, clean
+from fyta.domain import CADENCE
 from fyta.features import plant_features
-from fyta.sensors import frozen_windows, parse_timestamps, spec_violations
+from fyta.sensors import (check_grid, frozen_windows, parse_timestamps,
+                          spec_violations)
 from fyta.sources import image_predictions, triangulate
 
 
@@ -69,7 +73,7 @@ def test_a_falling_ec_does_not_corroborate():
     """
     ts = pd.date_range("2026-06-01", periods=200, freq="15min")
     ec = pd.Series(700.0, index=ts)
-    ec.iloc[120:] = 300.0                      # large fall AFTER the event
+    ec.iloc[120:] = 300.0                      # large fall after the event
     cleaned = pd.DataFrame({"device_id": "SENS-99", "ts_aligned": ts,
                             "ec_us_cm_clean": ec.to_numpy()})
     features = pd.DataFrame({"user_plant_id": "UP-99", "ts_aligned": ts,
@@ -89,18 +93,18 @@ def test_a_pre_event_image_is_not_a_response():
     """A photo taken before a fertilising event cannot be a response to it.
 
     The window was `hours.abs() <= 48`, so a fixture whose only photo was 2.5
-    hours EARLIER came back corroborated=True.
+    hours earlier came back corroborated=True.
     """
     ts = pd.date_range("2026-06-01", periods=200, freq="15min")
     ec = pd.Series(700.0, index=ts)
-    ec.iloc[120:] = 1200.0                     # strong post-event RISE
+    ec.iloc[120:] = 1200.0                     # strong post-event rise
     cleaned = pd.DataFrame({"device_id": "SENS-99", "ts_aligned": ts,
                             "ec_us_cm_clean": ec.to_numpy()})
     features = pd.DataFrame({"user_plant_id": "UP-99", "ts_aligned": ts,
                              "ec_1": ec.to_numpy(), "device_1": "SENS-99"})
     contextual = pd.DataFrame({"log_id": ["L"], "user_plant_id": ["UP-99"],
                                "log_type": ["fertilising"], "created_at": [ts[100]]})
-    # the ONLY photo is 2.5 hours BEFORE the event, and scores 0.9
+    # the only photo is 2.5 hours before the event, and scores 0.9
     heads = pd.DataFrame({"user_plant_id": ["UP-99"],
                           "captured_at": [ts[100] - pd.Timedelta("2.5h")],
                           "Nutrient deficiency": [0.9]})
@@ -113,10 +117,17 @@ def test_a_pre_event_image_is_not_a_response():
 
 
 def _parsed():
-    """The sample, read the way the pipeline reads it."""
+    """The sample, read the way the pipeline reads it.
+
+    `timestamp` stays the source text and `ts` is the parsed column -- the
+    difference the pipeline actually carries. An earlier helper assigned
+    `raw["timestamp"] = raw["ts"]`, which hid a crash: the quarantine branch
+    subtracted a Timedelta from `timestamp` and only a datetime column let that
+    pass. A fixture that has to lie about the input shape is not a regression
+    test for code that reads the real one.
+    """
     raw = pd.read_csv("../data/fyta_sensor_sample.csv")
     raw["ts"] = parse_timestamps(raw["timestamp"])
-    raw["timestamp"] = raw["ts"]
     raw["substrate_label"] = raw["substrate_label"].astype(str)
     return raw
 
@@ -126,7 +137,7 @@ def test_night_darkness_is_not_a_frozen_channel():
 
     The detector treated any unchanged run as frozen. Night is 12+ hours of
     exactly 0.0, so a fixture nulled 52 legitimate measurements. The rule is
-    only sound if the channel COULD have moved.
+    only sound if the channel could have moved.
     """
     n = 52
     ts = pd.date_range("2026-06-01 18:00", periods=n, freq="15min")
@@ -141,7 +152,7 @@ def test_night_darkness_is_not_a_frozen_channel():
     cleaned, rejections = clean(night, frozen_windows(night))
     assert rejections.empty, f"dark light was nulled: {rejections['reason'].tolist()}"
 
-    # A light channel frozen ABOVE the floor is still a fault.
+    # A light channel frozen above the floor is still a fault.
     stuck = night.copy()
     stuck["light_par"] = 37.5
     assert (frozen_windows(stuck)["channel"] == "light_par").any(), \
@@ -149,28 +160,45 @@ def test_night_darkness_is_not_a_frozen_channel():
 
 
 def test_conflicting_duplicates_are_quarantined_not_resolved():
-    """Two payloads on one key are unorderable; neither may be chosen.
+    """Payloads that disagree on one key are unorderable; none may be published.
 
     `drop_duplicates` kept an arbitrary winner and the audit approved it. The
-    identical case is still deduped losslessly.
+    identical case is still deduped losslessly -- but the conflict is decided on
+    the key group, not on whether a row happens to have a twin of its own. With
+    A, A, B, B on one key every row is quarantined, because keeping A (the
+    majority, or merely the twin) is the same arbitrary choice with an extra step.
     """
     raw = _parsed()
     baseline, _ = clean(raw, frozen_windows(raw))
 
     # `iloc[[0]]` keeps the dtypes; `iloc[0].to_frame().T` upcasts them to object
     # and the audit then sees a non-numeric column it never gets in practice.
-    twin = raw.iloc[[0]].copy()
-    twin["ec_us_cm"] = twin["ec_us_cm"] + 100
-    conflicted = pd.concat([raw, twin], ignore_index=True)
+    same, other = raw.iloc[[0]].copy(), raw.iloc[[0]].copy()
+    other["ec_us_cm"] = other["ec_us_cm"] + 100
+    conflicted = pd.concat([raw, same, other, other], ignore_index=True)
     cleaned, rejections = clean(conflicted, frozen_windows(conflicted))
 
-    quarantined = rejections[rejections["channel"] == "(row)"]
-    assert len(quarantined) == 2, \
-        f"both conflicting payloads must be quarantined, got {len(quarantined)}"
+    key = raw.iloc[0]
+    quarantined = rejections[(rejections["channel"] == "(row)")
+                             & (rejections["timestamp"] == key["timestamp"])]
+    assert len(quarantined) == 4, \
+        f"every row of a conflicting key must be quarantined, got {len(quarantined)}"
+    assert not (cleaned["device_id"].eq(key["device_id"])
+                & cleaned["timestamp"].eq(key["timestamp"])).any(), \
+        "quarantine left a version of the conflicting key in the frame"
     assert not cleaned.duplicated(["device_id", "timestamp"]).any(), \
         "quarantine left a duplicate key behind"
-    assert audit(cleaned, conflicted, rejections)["passed"].all(), \
-        f"the quarantine was not reconciled: {rejections['channel'].tolist()}"
+
+    # The ledger is the only surviving copy of those payloads, so it must carry
+    # the values themselves -- `raw_value = NaN` preserved no evidence at all.
+    payloads = sorted(json.loads(p)["ec_us_cm"] for p in quarantined["row_payload"])
+    assert payloads == sorted([key["ec_us_cm"], key["ec_us_cm"], key["ec_us_cm"] + 100,
+                               key["ec_us_cm"] + 100]), \
+        f"the quarantined payloads were not preserved: {payloads}"
+
+    result = audit(cleaned, conflicted, rejections)
+    assert result["passed"].all(), \
+        f"the quarantine was not reconciled: {result.loc[~result['passed'], 'check'].tolist()}"
 
     # Identical redelivery is still lossless.
     assert len(baseline) == 15935, f"identical dedupe changed: {len(baseline)}"
@@ -268,22 +296,157 @@ def test_untestable_is_not_a_negative():
 
 
 def test_notebook_assets_exist():
-    """Every image the notebook references must be on disk.
+    """Every image the notebook references must be on disk, as markdown.
 
-    A hand-made architecture diagram lived in `out/figures/`, which the pipeline
-    regenerates -- so `rm -rf out` (a legitimate clean-rebuild step) destroyed it
-    and the notebook rendered a broken image with no error anywhere.
+    Two ways this check passed while the notebook was broken. A diagram lived in
+    `out/figures/`, which the pipeline regenerates, so `rm -rf out` deleted it.
+    Then a prose rewrite turned `![alt](path)` into a shell call, which dropped
+    the leading `!` the reference regex needs: the test found ZERO references and
+    approved. An empty result set is not a pass.
+
+    The shell-call form is checked for directly, because it is what this notebook
+    actually lost: the viewer showed `__omp_shell("Variant A")` where the diagram
+    belonged.
     """
     import json
     import re
     from pathlib import Path
     nb = json.loads(Path("fyta_analysis.ipynb").read_text())
-    missing = []
-    for cell in nb["cells"]:
-        for ref in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", "".join(cell["source"])):
-            if not ref.startswith(("http://", "https://")) and not Path(ref).exists():
-                missing.append(ref)
+    text = "".join("".join(c["source"]) for c in nb["cells"])
+
+    refs = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", text)
+    assert refs, ("no image references found, but the notebook embeds the two "
+                  "architecture diagrams -- the markdown was altered")
+
+    missing = [r for r in refs
+               if not r.startswith(("http://", "https://")) and not Path(r).exists()]
     assert not missing, f"notebook references missing asset(s): {missing}"
+
+    mangled = re.findall(r"__omp_shell\(\"[^\"]*\]\(([^)]+)\)", text)
+    assert not mangled, f"image markdown was rewritten into a shell call: {mangled}"
+
+
+def test_audit_catches_a_deleted_device():
+    """Losing an entire device must fail the gate, not just losing a column.
+
+    The raw-column check compared only the keys present in both frames, so
+    deleting all 2,016 SENS-01 rows left every surviving value identical and
+    passed all 19 checks.
+    """
+    raw = _parsed()
+    cleaned, rejections = clean(raw, frozen_windows(raw))
+    thinned = cleaned[cleaned["device_id"] != "SENS-01"]
+
+    result = audit(thinned, raw, rejections)
+    failed = result.loc[~result["passed"], "check"].tolist()
+    assert any("retained, deduped or quarantined" in c for c in failed), \
+        f"2,016 deleted rows passed the gate; failures were {failed}"
+
+
+def test_audit_tolerates_a_reordered_frame():
+    """A re-ordered frame changed nothing, so the gate must not fail it.
+
+    The value comparison was positional, so sorting the same rows differently
+    read as "the raw columns were edited" -- which makes the gate both blind to a
+    real edit and noisy about a harmless one.
+    """
+    raw = _parsed()
+    cleaned, rejections = clean(raw, frozen_windows(raw))
+    shuffled = cleaned.sample(frac=1, random_state=0).reset_index(drop=True)
+
+    result = audit(shuffled, raw, rejections)
+    assert result["passed"].all(), \
+        f"a re-order failed the audit: {result.loc[~result['passed'], 'check'].tolist()}"
+
+
+def test_audit_catches_moved_dark_hour_flags():
+    """Flags must sit on the readings the detector found, not merely be counted.
+
+    `8 detected == 8 flagged` approved a frame where every flag had been moved
+    onto unrelated readings.
+    """
+    raw = _parsed()
+    cleaned, rejections = clean(raw, frozen_windows(raw))
+    spikes = cleaned.index[cleaned["qc_flags"].str.contains("dark_hour_single_sample")]
+    assert len(spikes), "the fixture must contain dark-hour spikes"
+
+    moved = cleaned.copy()
+    moved.loc[spikes, "qc_flags"] = moved.loc[spikes, "qc_flags"].str.replace(
+        "light_par:dark_hour_single_sample;", "", regex=False)
+    device = moved.loc[spikes[0], "device_id"]
+    others = moved.index[(moved["device_id"] == device) & ~moved.index.isin(spikes)]
+    moved.loc[others[:len(spikes)], "qc_flags"] = "light_par:dark_hour_single_sample;"
+
+    result = audit(moved, raw, rejections)
+    failed = result.loc[~result["passed"], "check"].tolist()
+    assert any("dark-hour" in c for c in failed), \
+        f"moved flags passed the gate; failures were {failed}"
+
+
+def test_audit_catches_a_skipped_frozen_detection():
+    """A cleaner that never detected the frozen window must not pass.
+
+    Every previous check reconciled the rejections that were recorded, so a
+    cleaner that omitted the detector entirely -- no window, no null, no ledger
+    row -- approved the input and left the frozen channel published.
+    """
+    raw = _parsed()
+    empty = frozen_windows(raw).iloc[0:0]
+    cleaned, rejections = clean(raw, empty)
+
+    result = audit(cleaned, raw, rejections)
+    failed = result.loc[~result["passed"], "check"].tolist()
+    assert any("frozen window in the source" in c for c in failed), \
+        f"a skipped frozen detection passed the gate; failures were {failed}"
+
+
+def test_an_unavailable_probe_does_not_mask_the_other():
+    """Probe 1 with no usable baseline must not hide probe 2's rise.
+
+    The score was accepted whenever the window had rows, so a NaN delta entered
+    `sigmas`, `max()` kept it as the first element, and the log reported "not
+    testable" while the same plant's second probe rose.
+    """
+    raw = _parsed()
+    cleaned, _ = clean(raw, frozen_windows(raw))
+    mapping = pd.read_csv("../data/user_plant_device_map.csv")
+    features = plant_features(cleaned, mapping)
+    contextual = pd.read_csv("../data/fyta_contextual.csv", parse_dates=["created_at"])
+    images = pd.read_csv("../data/fyta_images.csv", parse_dates=["captured_at"])
+    heads, _, _ = image_predictions(images)
+
+    at = pd.Timestamp("2026-06-03 14:00")
+    blanked = features.copy()
+    blanked.loc[blanked["user_plant_id"].eq("UP-1001"), "ec_1"] = float("nan")
+    m = ((blanked["user_plant_id"] == "UP-1001") & (blanked["ts_aligned"] > at)
+         & (blanked["ts_aligned"] <= at + pd.Timedelta("48h")))
+    blanked.loc[m, "ec_2"] = blanked.loc[m, "ec_2"] + 500
+
+    out = triangulate(cleaned, blanked, contextual, heads).set_index("log")
+    assert out.loc["LOG-00001", "probe_leg"] == "SENS-02", \
+        f"an invalid probe won the selection: {out.loc['LOG-00001', 'leg_detail']}"
+    assert out.loc["LOG-00001", "sensor_leg"] == "rises", \
+        f"probe 2's rise was hidden: {out.loc['LOG-00001', 'leg_detail']}"
+
+
+def test_a_uniform_timestamp_shift_is_off_grid():
+    """Spacing cannot see a uniform shift; grid membership can.
+
+    Moving one timestamp by a minute kept the modal gap at 15 minutes and left
+    completeness at 100 %, because both are computed from the device's own
+    readings. Grid membership is the only one of the three that can see it.
+    """
+    raw = _parsed()
+    check_grid(raw, CADENCE)                      # the fixture itself is on the grid
+
+    shifted = raw.copy()
+    shifted.loc[shifted.index[0], "ts"] += pd.Timedelta("1min")
+    try:
+        check_grid(shifted, CADENCE)
+    except AssertionError as e:
+        assert "off the" in str(e), f"the wrong thing failed: {e}"
+        return
+    raise AssertionError("a one-minute shift passed the grid check")
 
 
 if __name__ == "__main__":

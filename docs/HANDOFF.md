@@ -3,7 +3,10 @@
 State of the work, written so someone with **no memory of any session** can
 continue. Updated at phase boundaries per `AGENTS.md` §18.
 
-**Last updated:** 2026-09-19 · **Complete and submission-ready.**
+**Last updated:** 2026-09-20 · **Reassessment pass (R1–R6 + editorial) complete,
+verified, uncommitted.**
+**Current HEAD:** `b5ddc81` — this session's work is in the working tree, not yet
+committed or pushed.
 **Deadline:** Monday 21 September 2026, EOD, to gregor@fyta.de
 
 ---
@@ -13,249 +16,192 @@ continue. Updated at phase boundaries per `AGENTS.md` §18.
 ```
 FYTA Assessment/
   AGENTS.md                    engineering rules, binding
-  README.md                    how to run it, what the layout is
-  data/                        the four source CSVs — NEVER WRITTEN TO
+  README.md                    how to run it, layout, regenerable out/ note
+  data/                        the four source CSVs — NEVER WRITTEN TO (md5 unchanged)
   docs/
     assessment.md              the brief + correspondence (canonical)
     DATA.md                    what the data is, incl. the impossible bounds
-    second_opinion.md          two external audits, both acted on
-    observations.md            findings + method + mistakes (report source)
-    decision_register.md       D1–D13, each with an owner
+    second_opinion.md          first two external audits
+    second_opinion_astra.md    third review + the reassessment (R1–R6 + editorial)
+    observations.md            findings + method + mistakes; the last two sections
+                               record this session's two passes
+    decision_register.md       D1–D18, each with an owner
     HANDOFF.md                 this file
-    PIPELINE_DESIGN.md         Task 7, both variants
-    diagram_*.md               the prompts used to generate the two diagrams
+    PIPELINE_DESIGN.md         Task 7: one batching policy, latency, cost arithmetic
+    diagram_*.md               prompts used to generate the two diagrams
   submission/
-    fyta/                      the logic, split by change reason
-      domain.py                  assertions; no I/O, no pandas
-      sensors.py                 Tasks 1–2: read, detect, findings
-      cleaning.py                Task 3: two-tier clean + audit gate
-      sources.py                 Tasks 4, 6: source assessment, triangulation
-      features.py                Task 5: the per-plant feature table
-      signals.py                 Tasks 8, 9: a derived signal, log text
-    fyta_pipeline.py           entry point + printed narrative
-    fyta_analysis.ipynb        the same results, rendered
-    test_gates.py              regression checks for the corrected defects
-    WRITEUP.md / WRITEUP.pdf   the one-page submission note
-    md_to_pdf.py               builds the PDF
-    out/                       11 CSVs, 4 figures, run.log
+    images/                    hand-made architecture diagrams (static, NOT in out/)
+    fyta/                      domain.py · sensors.py · cleaning.py · sources.py
+                               features.py · signals.py
+    fyta_pipeline.py           entry point + stdout tee to out/run.log
+    fyta_analysis.ipynb        50 cells (21 code) · executed fresh · 0 errors
+    test_gates.py              18 regression checks (each fails on revert)
+    WRITEUP.md / WRITEUP.pdf   the submission note: 1 page, 533 words, 10.6 pt
+    md_to_pdf.py               builds the PDF via headless Chrome
+    out/                       11 CSVs, 2 figures, run.log (all regenerable)
 ```
 
-**Verified at this boundary:**
+**Verified at this boundary — each line is an output that was read, not expected:**
 
 ```
-uv run fyta_pipeline.py    exit 0 · writes out/run.log itself · 634 lines
-uv run test_gates.py       11 of 11 regression checks pass
-                           each verified to FAIL when its fix is reverted
-fyta_analysis.ipynb        52 cells · 0 errors · 2 figures
-WRITEUP.pdf                1 page, A4 · 783 words
-data/                      unmodified — md5 df7b5d41cd79…
+uv run fyta_pipeline.py    exit 0 · 21 of 21 audit checks pass · 565 lines of run.log
+uv run test_gates.py       18 of 18 pass · 7 new checks each verified to FAIL on revert
+fyta_analysis.ipynb        50 cells · 21 code · all executed · 0 errors · 2 figures
+idempotency                a full re-run reproduced all 14 artifacts byte-for-byte (md5)
+prose pass                 module prose 6,057→3,616 w · prints 1,745→940 w ·
+                           notebook 5,357→4,245 w · design doc 3,754→3,021 w
+WRITEUP.pdf                1 page, A4 · 533 words at 10.6 pt (was 783 words at 9.3 pt)
+data/                      unmodified — `git status` clean on data/
+environment                Python 3.12.12 · pandas 2.3.3 · numpy 2.4.6 (<2.5) · matplotlib 3.11.2
 ```
 
-**Three external reviews have run.** The third (`second_opinion_astra.md`) found
-ten defects and three wrong claims; all are fixed and every fix has a test.
+The PDF needs `uv run --with markdown`; Chrome does the print step. The notebook
+needs `uv run --with nbconvert` to execute headlessly.
 
-Environment: Python 3.12.12, pandas 2.3.3, numpy 2.4.6 (**pinned `<2.5`** — 2.5
-deprecates a generic timedelta unit pandas 2.3.3 still uses), matplotlib 3.11.2.
-The PDF needs `uv run --with markdown`; Chrome does the print step.
+---
 
-## 2. Done — all nine tasks
+## 2. What this session changed (the reassessment's R1–R6)
 
-| Task | Where |
-|:---|:---|
-| **1 — Ingest & orient** | §1a–1e. Load, structure, channels, events, two figures |
-| **2 — Data quality** | §2a–2c. 11 detectors → 13 findings → detection coverage |
-| **3 — Cleaning** | §3a Clean (sensor) · **§3b Normalize (image JSON → flat)** |
-| **4 — Source agreement** | §4a. Four sources, four answers |
-| **5 — Feature table** | §5a. Grain `(user_plant_id, ts_aligned)`, asserted |
-| **6 — Triangulation** | §6a. Negative, for structural reasons |
-| **7 — Pipeline design** | §7a–7g. Sketch only; both diagrams rendered |
-| **8 — Derived signal** | §8a. `drydown_pct_per_day` |
-| **9 — Log text** | §9a. A lookup, not a classifier |
-| **Write-up** | `submission/WRITEUP.pdf`, one page |
+| # | Defect | Fix | Evidence it fails when reverted |
+|:---|:---|:---|:---|
+| R1 | Fresh-kernel `NameError` at Task 6 — `heads` consumed, never defined | Image-normalisation cell restored in §3b | cell 31 now defines it; notebook executes clean |
+| R2 | Quarantine: raw-text timestamp arithmetic, group masking (`A,A,B,B` → 0 quarantined), payloads lost | Conflict decided per **key group**; `ts_aligned` computed before the branch; ledger gains `row_payload` | `test_conflicting_duplicates_are_quarantined_not_resolved` |
+| R3 | Audit accepted 2,016 deleted rows, rejected re-orders, counted flags, never re-detected frozen windows | Row accounting (retained + deduped + quarantined = source), value compare **after aligning by key**, key-level flag reconciliation, independent frozen re-detection | four tests: deleted device · reordered frame · moved flags · skipped frozen detection |
+| R4 | A `NaN` probe score won `max()` and hid the other probe's rise | Scores require valid observations; every probe reports an outcome in `leg_detail` | `test_an_unavailable_probe_does_not_mask_the_other` |
+| R5 | Claims contradicted the fixes (dry-down calibration, shared environment, "all fixed", triangulation power, off-grid) | Docstrings, printed claims, notebook prose and article corrected; `check_grid` now asserts grid **phase**, which catches the one-minute-shift fixture | `check_grid` on a shifted frame; claims re-read against the run |
+| R6 | Batching policy inconsistent; $200–500 envelope unsupported | One policy stated: **daily Parquet objects, $15/mo of PUTs**, total ≈$190–450/mo; hourly = $533–792/mo; lake freshness ≤1 day with hourly buffer checks | arithmetic in `PIPELINE_DESIGN.md` §5, mirrored in the notebook |
 
-**Outputs:** `cleaned_sensor.csv` · `qc_rejections.csv` · `images_flattened.csv`
-· `plant_features.csv` · `task2_*.csv` (3) · `task4_source_assessment.csv` ·
-`task6_triangulation.csv` · `task8_drydown.csv` · `task9_log_signals.csv` ·
-`figures/` · `run.log`
+Also corrected: the dark-hour flag was matched on the **raw** clock while the
+detector ran on the aligned frame (latent — SENS-08, the only spiking device, has
+no offset; the 8 detected and 8 flagged rows coincide). Details in
+`docs/observations.md`, "The fourth review — the reassessment".
 
-## 3. Not done
+### The prose pass (the reviewer's closing editorial section)
 
-Nothing. Every task and the required write-up exist.
+Applied to submission-facing prose, with each repeated explanation reduced to one
+home (the dedup map is in `docs/observations.md`, "The prose pass"):
 
-## 4. Decisions taken, and why
+| Artifact | Before | After |
+|:---|---:|---:|
+| `fyta/*.py` comments + docstrings | 6,057 w | 3,616 w |
+| `fyta_pipeline.py` print literals (→ `out/run.log`) | 1,745 w | 940 w |
+| `fyta_analysis.ipynb` markdown | 5,357 w | 4,245 w |
+| `docs/PIPELINE_DESIGN.md` | 3,754 w | 3,021 w |
 
-Full list in `docs/decision_register.md`. The load-bearing ones:
+Cut: review history from code, all-caps emphasis, pull-quotes, "not X but Y"
+setups, the notebook's second architecture essay (Task 7 now points at the design
+doc), and the duplicated probe / clipping / two-tier explanations. Kept: every
+threshold, count, path and reversal condition; every `ponytail:` marker; and the
+test docstrings, which are the one place an old defect belongs.
 
-**Two tiers, because "outside spec" ≠ "provably wrong".** Impossible → null with
-a reason. Outside spec but *possible* → **flag and keep**. Collapsing them starts
-deleting real data. The impossible ceilings are set **1.25×–12× above** the spec
-ceilings, because a too-narrow bound nulls real data while a too-wide one merely
-leaves junk flagged. Derivation per channel is in `docs/DATA.md` §8.
+**One statement was lost in the process and restored.** `cleaning.py` dropped
+`df = df.drop(columns=["ts"])` while its comment was rewritten, and the next
+pipeline run failed loudly on it. After the repair: 18/18 regression checks,
+pipeline exit 0, and all 14 artifacts byte-identical to the pre-pass run — only
+`run.log` differs, because that is the artifact the pass rewrote.
 
-**Never derive a physical bound from the data.** A quantile or 3σ cut moves with
-the data, so a fleet-wide fault would shift the bound and hide inside it.
+**The notebook lost its diagrams and one code cell** and was repaired after the
+owner opened it: the image markdown had been rewritten into a shell call (so both
+architecture diagrams rendered as placeholders) and the `image_predictions` cell
+that defines `heads` had been dropped. The asset test passed anyway, because the
+rewritten reference no longer matched its regex and it never asserted that it had
+found anything. All three failure modes now fail loudly (recorded in
+`docs/observations.md`, "Correction: the notebook's diagrams were rewritten into
+shell calls").
 
-**Raw is never modified.** Every fix is a new column; the original stays beside
-it. Proven by multiset comparison across all four tables.
+---
 
-**Two time columns, and the difference matters.** `timestamp` is the **source
-text as delivered** — mixed format on purpose (SENS-07 writes DD/MM), because
-rewriting it destroys the evidence that two formats coexist. `ts_aligned` is the
-ISO, uniform, clock-corrected column that **every join uses**.
+## 3. Done — all nine tasks
 
-**Detection and remediation are separate, reconciled both ways.** The audit gate
-checks rejections↔nulls *and* detector↔flags. Both directions, or a check that
-cannot fail.
-
-**The code is six modules, split by change reason.** `domain.py` imports no
-pandas — `AGENTS.md` §7 made structural.
-
-**Task 3 normalizes as well as cleans.** The sensor table needed *cleaning*; the
-image table needed *normalizing* — a JSON blob in one column that no consumer can
-filter, join or aggregate. Both are "turn what was delivered into what can be
-used", so both live under Task 3.
-
-**The pipeline parses `data/fyta_images.csv`; consumers read
-`out/images_flattened.csv`.** Reading back a file the pipeline wrote would make
-it depend on its own history, and a stale copy would go unnoticed.
-
-**Task 4 is pure prose — no code cells.** Its working is in `run.log` §4a and
-`out/task4_source_assessment.csv`.
-
-## 5. Open items — each with an owner
-
-| # | Question | Owner |
+| Task | Where | Status |
 |:---|:---|:---|
-| D1 | Are the spec ranges current for this generation? | Hardware |
-| D2 | Is 15 min the configured rate or a buffer flush? | Firmware |
-| D3 | SENS-07 +2h: timezone or clock fault? | Firmware |
-| D4 | Is °F one device or a firmware variant? | Firmware |
-| D5 | Can analysis use flagged out-of-spec values? | Analysis |
-| D6 | Longest a healthy channel holds a value? | Firmware |
-| D7 | Is `substrate_label` the curve actually applied? | Product |
-| D8 | Can analysis tolerate a 48.5 h gap? | Analysis |
-| D9 | Does the device do anything at 00:00? | Firmware |
-| D10 | Are the 8 devices co-located? | Product |
-| **D11** | **Does the app allow two sensors on one plant?** | **Product** |
-| D12 | Does a soil-temperature spec exist? | Hardware |
-| D13 | Can a light at that pot be real? | Firmware |
-| **D16** | Is there a staged-publish convention to follow? | Platform |
-| **D17** | What should a feature table DO about two probes? (sharpens D11) | Product |
+| **1 — Ingest & orient** | §1a–1e | Complete |
+| **2 — Data quality** | §2a–2c. 11 detectors → 13 findings → detection coverage | Complete |
+| **3 — Cleaning** | §3a Clean · §3b Normalize (now *in* the notebook, with its checks) | Complete |
+| **4 — Source agreement** | §4a. Four sources, four answers → `out/task4_source_assessment.csv` | Complete |
+| **5 — Feature table** | §5a. Grain `(user_plant_id, ts_aligned)`, asserted | Complete |
+| **6 — Triangulation** | §6a. Every probe, 3-state leg, per-probe detail | Complete |
+| **7 — Pipeline design** | `PIPELINE_DESIGN.md` + two diagrams | Complete |
+| **8 — Derived signal** | §8a. `drydown_pct_per_day` + `drydown_asof` | Complete |
+| **9 — Log text** | §9a. A lookup, not a classifier | Complete |
+| **Write-up** | `WRITEUP.pdf` — one page, 533 words | Complete |
 
-**Plus two raised by this work, neither in the register yet:**
+---
 
-| Question | Owner | Why |
-|:---|:---|:---|
-| Did the image model consume VWC, or did one generator emit both series? | Vendor | decides whether `r = 0.75` is corroboration or an artefact |
-| Does the app offer canned log phrases, or free text? | Product | decides whether the 1:1 phrase→type mapping is a schema fact or a generation signature |
+## 4. Open items (owners in `docs/decision_register.md`)
 
-**D11 blocks the most.** It closes both F9 (the join fan-out) and F10 (the probes
-that don't correlate) — they are one cause with two symptoms.
+| # | Question | Owner | Impact |
+|:---|:---|:---|:---|
+| D1 | Are the spec ranges current for this hardware generation? | Hardware | Validity flags vs rejections |
+| D2/D6 | Is 15 min the configured rate, and what is the real buffer size? | Firmware | Slot-grid expectations, watermark |
+| D3 | SENS-07 +2h: timezone or drifting clock? | Firmware | Clock correction |
+| D4 | Is °F one device or a firmware variant? | Firmware | Scope of the unit fix |
+| D7 | Is `substrate_label` the curve actually applied? | Product | Magnitude of every VWC value |
+| D8 | Can downstream tolerate a 48.5 h hole? | Analysis | Sparse vs dense policy |
+| D11/D17 | Two sensors on one plant — allowed, and what should a feature table do? | Product | Blocks any fusion rule |
+| D14 | Did the image model consume VWC? | Vendor | Independence of r = 0.75 |
+| D18 | Does anything need **lake** data fresher than a day? | Platform | Batching policy and cost |
 
-## 6. Corrections made — do not repeat these
+---
 
-Two external audits were run; both were acted on. Every item below was
-reproduced before being fixed.
+## 5. Corrections made — historical reference
 
-**From the first audit:**
+| Cycle | Believed | Reality | Caught by |
+|:---|:---|:---|:---|
+| Review 1 | Gate prevented bad publication | 1,344 restored frozen readings passed | Mutation testing |
+| Review 1 | Run-start arithmetic counted isolated points | Counted run starts | Recomputation |
+| Review 1 | `.abs()` on EC delta checked rise | A large fall counted as corroboration | Direction testing |
+| Review 2 | Gate reconciled flags | 736 stripped flags passed | Mutation testing |
+| Review 2 | Symmetric image window safe | A pre-event photo counted as a response | Fixture |
+| Review 3 | Frozen rule safe fleet-wide | Nulled 52 legitimate dark-hour zeros | Fixture |
+| Review 3 | Duplicates deduped losslessly | Conflicting payloads resolved by first-wins | Fixture |
+| Review 3 | Differentiation removes calibration | Gain `a` survives differentiation | Arithmetic |
+| Review 3 | Shared environment invalidates peers | A tight shared signal is a *better* reference | Domain logic |
+| **Review 4** | **Quarantine fixed** | **Group masking: `A,A,B,B` quarantined nothing; the branch crashed on source text** | **Reassessment + fixture** |
+| **Review 4** | **Audit accounted for rows** | **Inner join on shared keys: 2,016 deleted rows passed; re-orders failed** | **Reassessment + fixture** |
+| **Review 4** | **Flags reconciled** | **Counts, not keys: moving all 8 flags passed** | **Reassessment + fixture** |
+| **Review 4** | **Frozen detection verified** | **Only recorded rejections were audited; skipping the detector passed** | **Reassessment + fixture** |
+| **Review 4** | **Probe selection sound** | **`NaN` score won `max()` and reported "not testable" over a real rise** | **Reassessment + fixture** |
+| **Review 4 (self)** | **Flag matched the row the detector meant** | **Matched on the raw clock, not the aligned one** | **Reading the code against its own detector** |
+| **Prose pass** | **A prose-only edit cannot change behaviour** | **It deleted a statement in `cleaning.py`; the next pipeline run failed on it** | **Running the pipeline, not reading the diff** |
+| **Prose pass (2)** | **The diagrams survived the notebook rewrite** | **`![alt](path)` became a shell call, one code cell was dropped, and the asset test passed on an empty reference set** | **The owner, opening the notebook** |
 
-| Believed | Reality | Caught by |
-|:---|:---|:---|
-| The audit gate prevented bad publication | It asked *"is there ≥1 null?"* — any null satisfied it. **1,344 restored frozen values passed** | Mutation testing |
-| `isolated: n - adjacent` counted isolated readings | It counted **runs**. A 431-sample excursion reported as 11 isolated; it is 11 runs, 431 in-run, **0 isolated** | Recomputation |
-| `.abs()` on the EC delta was fine | A large **fall** counted as corroboration of a **rise** | Direction testing |
-| F10/F12/F11's numbers | They were **transcribed**, not computed — no code produced them | Reading the code |
+The pattern across all four cycles: **the check that "verifies" a behaviour is the
+part most likely to be wrong**, because a check that passes is not investigated.
 
-**From the second audit:**
+---
 
-| Believed | Reality | Caught by |
-|:---|:---|:---|
-| The gate was fixed | It reconciled **rejections** but not **flags**. Stripping all **736** `outside_spec` flags passed all 13 checks | Mutation testing |
-| The image window was bounded | It was **symmetric**, so a photo 2.5 h *before* an event counted as a response | Fixture |
-| "A dead sensor… one continuous fault" (write-up) | SENS-04 is *unknown*, not dead, and it is 11 runs, longest 44 — errors I introduced while rewriting for plain language | Re-verification |
-| "Soil type, sensor model and plant are code" | All three are already **data** | Reading the data |
-| `log_alignment` tested the plant | It tested `device_id.first()` — **one arbitrary probe** per plant | Your question about F9 |
-| F11 was about watering | **Only one of four log legs was tested** | Your question |
+## 6. Next actions
 
-**Process errors, self-inflicted:**
+1. **Commit and push** this pass (`submission/*`, `docs/*`) — the tree is dirty by
+   design so the owner can review the diff first.
+2. **Prose targets are met, with one honest gap.** `WRITEUP.md` is 533 words
+   including headings against the reviewer's suggested 400–500 for body prose;
+   the remaining prose lives in tables of evidence. Further cuts would remove
+   findings or limits, which the reviewer ranked above brevity.
+3. If the owner wants the deferred full expected-grid validation: it needs the
+   **installation window** from the platform (D2/D6), which the sample does not
+   carry. `device_coverage()` documents the observed-span ceiling in the meantime.
+4. Nothing else is outstanding from the reassessment: "No additional features or
+   architecture diagrams are needed."
 
-| What | Cost |
-|:---|:---|
-| Sliced `sensors.py` with a boundary *before* the start — duplicated half the file (983 lines) | Caught by inspecting the result |
-| `git checkout HEAD -- sensors.py` to repair it | **Destroyed two pieces of uncommitted work** (`EVIDENCE_NOTES`, the multi-probe fix). Both redone. `git checkout` reverts to the last *commit*, not to "a moment ago" |
-| Rewrote Task 2's evidence section when Task 4 was asked for | Reverted. **Fourth** time an adjacent-but-unrequested change was made |
-| nbconvert aborting on an error **without writing**, leaving the previous run's outputs | Looks like `0 errors`. Has happened **three times**; only caught by reading the outputs |
+---
 
-**From the third review (Astra) — all 18 checkable claims reproduced:**
+## 7. Unrecoverable if lost
 
-| Believed | Reality | Caught by |
-|:---|:---|:---|
-| The frozen rule was safe fleet-wide | It nulls **any** long unchanged run, including legitimate darkness — 52 night light readings | Fixture |
-| Duplicates were deduped losslessly | Identical ones were; **conflicting** ones were dropped to an arbitrary winner | Fixture |
-| The audit passed on healthy input | `len(rejections) > 0` was required, so clean batches **failed** | Fixture |
-| "detected unit outliers are all fixed" | Membership, not arithmetic — every SENS-07 temp replaced with 25 °C passed | Mutation |
-| `triangulate` tested the plant | It read `ec_1` / `device_1` — **probe 1 only** | Fixture |
-| Untestable windows | `NaN` was reported as `"no rise"` — absent evidence as negative evidence | Fixture |
-| A rate escapes the substrate calibration | **`d(ax+b)/dt = a·dx/dt`.** The gain survives; that was simply wrong | Arithmetic |
-| High cross-device r makes fleet checks meaningless | Backwards — a tight shared signal is a *better* reference. And the code used it anyway | Reading |
-| A NULL expected slot is fabricated data | It is not. Sparse and dense are both honest; it is a downstream choice | Reading |
-| "FYTA is already using S3" | Synthetic fixture paths | Reading |
-| The script wrote `run.log` | It printed a claim; the shell redirect wrote the file | Reading |
-| Notebook: "65–107 … keep it" | The code nulls above **100** | Reading |
-| Notebook: "F4 flagged in `qc_flags`" | 702 of 1,056 drifting rows carry no flag | Reading |
-
-**The root cause of most of these was `AGENTS.md` itself**, which stated
-assumptions as rules — "two probes must be positively correlated" propagated into
-the code, the write-up, and an answer given to the owner. The file now opens by
-saying it records decisions rather than evidence, and the specific claims are
-amended.
-
-**The pattern:** the audits, the ponytail review, and *running the code* each
-caught what reading did not. But the third review asked questions the first two
-never did — **"does the header describe what is computed?"** and **"is the stated
-reason true?"** No amount of re-running the same checks reaches those.
-
-## 7. Next actions
-
-1. **Review the diff, then commit.** The working tree holds every fix from the
-   third review and is **deliberately uncommitted** — the owner asked to see the
-   changes first. Nothing else is pending.
-2. **Ship.** Run kuchiku when the review is done.
-3. **After the deadline**, if the repo becomes a portfolio piece: decide whether
-   `docs/assessment.md` (Gregor's full email thread) and the three
-   `second_opinion*.md` files should stay in it.
-
-## 8. Unrecoverable if lost
-
-Nothing below is derivable from the CSVs. It exists only in prose.
-
-**The method lessons** (`observations.md` Part 2, eleven of them). The four that
-carry the most:
-
-- **Correlation cannot see a unit error.** SENS-07's temperature correlates at
-  **0.9843** — the highest in the fleet — while reading Fahrenheit. `y = ax + b`
-  leaves correlation untouched.
-- **Two problems can hide each other.** The clock offset had to be removed before
-  the unit error became clean evidence (sd 1.363 → 0.444). Structural defects
-  before semantic ones.
-- **A magnitude check cannot see a context problem.** The light spikes sit inside
-  every stated limit. Finding them needed a fourth kind of question — comparing a
-  reading against its *neighbours*.
-- **A claim tested on one leg is not tested.** F11 was claimed from watering
-  alone. All four log types tested, **none lines up, and light contradicts** —
-  *"moved closer to window"* moves the daily peak **down** (−4.4).
-
-**The corrections record** (§6) — evidence of method, not of success.
-
-**The causality analysis.** The two-sensor issue is the most *interesting*
-problem but causes only 2 of 13 findings; the five worst are on single-sensor
-plants. That rules it out as the root cause.
-
-**Why flag-vs-empty matters.** A successor reading only the code would likely
-"simplify" the two-tier rule into one threshold — and start deleting real data.
-
-**The four questions that changed the work.** Domain intuition beating statistics
-("a person can turn on a light"), skepticism about necessity ("is that
-unnecessary?"), and the two that found real defects: *"how can you fix the join if
-the logs have no sensor id?"* and *"doesn't every log type have a channel that
-should respond?"* Both exposed under-tested claims.
+1. **Correlation cannot see a unit error:** SENS-07 correlates at `0.9843` with
+   peers while reading Fahrenheit. Scale and jitter ratio (1.82×) proved it.
+2. **Two problems hide each other:** the clock offset had to be aligned before the
+   unit-error variance collapsed cleanly (sd 1.363 → 0.444).
+3. **A magnitude check cannot see context:** the dark-hour light spikes sit inside
+   `[0, 589]` spec; only comparison against neighbours reveals them.
+4. **Testing every leg matters:** light *contradicts* its own log phrase (peak
+   drops −4.4 when "moved closer to window").
+5. **A check that passes is not evidence.** Four review cycles found defects that
+   were "verified" by a check which could not fail. Mutation-test every new gate.
+6. **The safest-looking code path is the least exercised.** The quarantine branch
+   survived two reviews because the real sample has *only* payload-identical
+   duplicates, and a test helper had been rewritten to hide the input's true shape.
+7. **A comment is not a statement.** Rewriting prose in a file that runs is still
+   editing that file; the prose pass deleted a statement whose comment survived.
+   Run the artifact, do not read the diff.

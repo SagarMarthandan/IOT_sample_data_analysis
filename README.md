@@ -14,7 +14,14 @@ uv run test_gates.py             # regression checks; each fails if its fix is r
 ```
 
 Idempotent: same input, same output. `submission/fyta_analysis.ipynb` imports
-the same code and renders the narrative with the figures.
+the same code and renders the narrative with the figures. It executes headlessly,
+which is how its stored outputs are kept honest:
+
+```bash
+cd submission
+uv run --with nbconvert python -m nbconvert --to notebook --execute \
+  fyta_analysis.ipynb --output /tmp/nb.ipynb
+```
 
 The one-page submission note is `submission/WRITEUP.md` → `WRITEUP.pdf`. Edit
 the Markdown and rebuild:
@@ -32,9 +39,9 @@ submission/
   fyta/                   the logic, split by change reason
     domain.py               assertions; no I/O, no pandas
     sensors.py              Tasks 1-2 — read, detect, findings
-    cleaning.py             Task 3  — two-tier clean + audit gate, and
-                                    the image JSON → flat table
-    sources.py              Tasks 4, 6 — source assessment, triangulation
+    cleaning.py             Task 3a — two-tier clean + the audit gate
+    sources.py              Tasks 3b, 4, 6 — image JSON → flat table, source
+                                    assessment, triangulation
     features.py             Task 5  — the per-plant feature table
     signals.py              Tasks 8, 9 — a derived signal, log text
   fyta_pipeline.py        entry point + printed narrative
@@ -59,11 +66,10 @@ there dies on the next `rm -rf out`, and nothing reports it. The architecture
 diagrams the notebook embeds live in `submission/images/` for exactly that reason,
 and `test_gates.py` fails if any image the notebook references is missing.
 
-Two time columns, and the difference matters. `timestamp` is the **source text as
-delivered** — mixed format on purpose, because SENS-07 writes DD/MM while the
-rest write ISO — and rewriting it would destroy the evidence that both formats
-coexist. `ts_aligned` is the ISO, uniform, clock-corrected column that every join
-uses.
+Two time columns. `timestamp` is the **source text as delivered** — mixed format on
+purpose, because SENS-07 writes DD/MM while the rest write ISO. `ts_aligned` is the
+ISO, clock-corrected column every join uses. `fyta/cleaning.py` states the contract
+in full.
 
 ## Notes
 

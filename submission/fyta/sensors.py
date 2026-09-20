@@ -1,7 +1,9 @@
-"""Tasks 1-2: what the data is, and what is wrong with it.
+"""Tasks 1-2: data inventory and defect detection.
 
-Section banners below are greppable. Task 1 states what is PRESENT, Task 2 what
-is WRONG -- the split the notebook and the run log both rely on.
+Task 1 describes delivered rows, timestamps, coverage, declared keys, and
+plots. Task 2 applies independent detectors for ranges, clocks, unit scale,
+drift, duplicate keys, frozen channels, join fan-out, and event alignment.
+The same detector outputs feed the notebook and run log.
 """
 
 import matplotlib.pyplot as plt
@@ -14,10 +16,13 @@ from .domain import (CADENCE, CHANNELS, CLOCK_OFFSET_H, FROZEN_MIN_RUN,
 # --------------------------------------------------------------------- Task 1
 
 def parse_timestamps(raw: pd.Series) -> pd.Series:
-    """Parse the two date formats present. Raise on anything else.
+    """Parse ISO and DD/MM timestamps; reject every other format.
 
-    Coercing would turn a format change into silent NaT.
+    Coercion would turn a new source format into a silent `NaT`.
     """
+    # Preserve source text until parsing succeeds. The regexes intentionally
+    # accept only the two delivered layouts, then the slash-date assertion proves
+    # whether day-first order is justified for this batch.
     text = raw.astype(str)
     iso = text.str.match(r"^\d{4}-\d{2}-\d{2} ").fillna(False).astype(bool)
     dmy = text.str.match(r"^\d{1,2}/\d{1,2}/\d{4} ").fillna(False).astype(bool)
@@ -33,12 +38,8 @@ def parse_timestamps(raw: pd.Series) -> pd.Series:
     out[iso] = pd.to_datetime(text[iso], format="%Y-%m-%d %H:%M:%S")
     out[dmy] = pd.to_datetime(text[dmy], format="%d/%m/%Y %H:%M")
 
-    # `01/06/2026` is ambiguous. Day-first is provable, not assumed: a first
-    # field above 12 cannot be a month.
-    #
-    # Only when slash dates are actually present. The assertion used to run
-    # unconditionally, so an all-ISO batch failed on an empty slice -- a guard
-    # that fires on healthy input, which is the failure mode AGENTS.md 5 names.
+    # Slash dates are day-first only when a first field exceeds 12. Skip the
+    # assertion when no slash dates exist.
     if dmy.any():
         first = pd.to_numeric(text[dmy].str.extract(r"^(\d{1,2})/")[0], errors="coerce")
         assert first.max() > 12, (
@@ -49,35 +50,37 @@ def parse_timestamps(raw: pd.Series) -> pd.Series:
 
 
 def check_grid(sensor: pd.DataFrame, cadence: pd.Timedelta) -> None:
-    """Assert every device is on the declared grid.
+    """Assert per-device spacing and grid phase.
 
-    Does NOT catch the day/month ambiguity: a uniform misread still lands on
-    the grid. That one is proven by impossibility in parse_timestamps.
+    Spacing misses a uniform clock shift; phase catches it. Day/month ambiguity
+    can still land on the grid and is checked in `parse_timestamps`.
     """
+    # Modal spacing checks cadence within each device. Phase checks every
+    # timestamp against the cadence origin, so a fleet shifted together still
+    # fails even though successive gaps remain regular.
     for device, g in sensor.groupby("device_id", sort=True):
         modal = g["ts"].diff().dropna().mode()
         assert len(modal) and modal.iloc[0] == cadence, (
             f"{device}: modal gap {modal.tolist() if len(modal) else None} != {cadence}"
         )
+    # Use seconds since midnight so cadences over an hour also work.
+    seconds = (sensor["ts"].dt.hour * 3600 + sensor["ts"].dt.minute * 60
+               + sensor["ts"].dt.second)
+    off = (seconds % int(cadence.total_seconds())).ne(0) | sensor["ts"].dt.microsecond.ne(0)
+    assert not off.any(), (
+        f"{int(off.sum())} reading(s) are off the {cadence} grid -- spacing alone "
+        f"cannot see this: {sensor.loc[off, 'ts'].head(3).tolist()}"
+    )
 
 
 def device_coverage(sensor: pd.DataFrame, cadence: pd.Timedelta) -> pd.DataFrame:
-    """What each device covers, and how that compares to the grid it was due.
+    """Coverage and observed-grid compliance per device.
 
-    One computation, split at the *presentation*: Task 1 prints the coverage
-    columns, Task 2 prints the compliance columns. The task boundary belongs
-    where the reader meets it, not duplicated into a second groupby loop.
-
-    THE WINDOW IS THE OBSERVED SPAN, and that is what the completeness figure
-    measures -- slots between this device's own first and last reading. It is not
-    an installation window. A device whose first day never arrived reports 100%
-    against the days it did deliver, because the endpoints come from the data.
-    Deleting SENS-01's first day still reports 1,920 due and 1,920 delivered.
-
-    That is a real ceiling, and it is named here rather than fixed by guessing: a
-    true grid needs the device's activation time from the platform, and the
-    sample does not carry it. `slots_due` is therefore a floor on the slots a
-    device owed, never a ceiling.
+    `rows` includes duplicate delivery; `delivered` counts distinct timestamps;
+    `surplus` is their difference. `slots_due` spans a device's first and last
+    delivered reading, and `missing` measures holes within that observed span.
+    Completeness therefore describes delivered coverage, not installation
+    coverage: activation time from the platform would be required for that.
     """
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
@@ -97,7 +100,7 @@ def device_coverage(sensor: pd.DataFrame, cadence: pd.Timedelta) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-#: Columns Task 1 shows (what is present) vs Task 2 shows (what is wrong).
+#: Task 1 columns (present data).
 COVERAGE_COLS = ["device", "rows", "slots_due", "span_days", "first", "last"]
 
 
@@ -152,11 +155,10 @@ def plot_by_device(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.D
 # --------------------------------------------------------------------- Task 2
 
 def spec_violations(sensor: pd.DataFrame) -> pd.DataFrame:
-    """Readings outside the published range, split isolated vs sustained.
+    """Classify published-range violations by contiguous run.
 
-    The split is the treatment decision, not a detail: an isolated impossible
-    sample is a glitch you null, while a sustained excursion is a regime change
-    and nulling it would delete real history.
+    An isolated reading and a sustained excursion require different treatment:
+    the former can be a glitch, while removing the latter can erase a regime.
     """
     rows = []
     for channel, (lo, hi) in SPEC.items():
@@ -166,11 +168,8 @@ def spec_violations(sensor: pd.DataFrame) -> pd.DataFrame:
             n = int(bad.sum())
             if not n:
                 continue
-            # Run-length encoding. The obvious shortcut --
-            # `n - (bad & bad.shift()).sum()` -- counts RUNS, not isolated
-            # readings: a 431-sample excursion reports as ONE "isolated" sample,
-            # and `in_runs` reports L-1 per run instead of L. Both columns were
-            # wrong, in a direction that made sustained faults look intermittent.
+            # Run-length encoding counts samples in sustained excursions, not
+            # just runs.
             b = bad.to_numpy()
             edges = np.flatnonzero(np.diff(np.r_[False, b, False].astype(int)))
             lengths = edges[1::2] - edges[::2]
@@ -187,10 +186,11 @@ def spec_violations(sensor: pd.DataFrame) -> pd.DataFrame:
 
 
 def align_clocks(sensor: pd.DataFrame) -> pd.DataFrame:
-    """Put `ts` onto real local time, using the declared offsets.
+    """Put `ts` onto local time with declared offsets.
 
-    Kept separate from the checks so a check can never shift a timestamp twice:
-    it uses whatever time it is handed, and only this function moves the clock.
+    The returned copy permits detectors to use local time without mutating
+    source data. Keeping the operation here prevents a detector from applying an
+    offset twice.
     """
     out = sensor.copy()
     out["ts"] = out["ts"] - pd.to_timedelta(
@@ -201,24 +201,16 @@ def align_clocks(sensor: pd.DataFrame) -> pd.DataFrame:
 def dark_hour_spikes(sensor: pd.DataFrame, channel: str = "light_par",
                      dark_hours=(22, 23, 0, 1, 2, 3, 4),
                      quiet: float = 0.25) -> pd.DataFrame:
-    """A dark-hours light reading that its own neighbours cannot explain.
+    """Find isolated dark-hour light spikes.
 
-    Night light is **not wrong by itself** -- a person can switch a lamp on, and
-    the sensor would correctly see it.
-
-    What is wrong is a *single* 15-minute sample. A switched-on lamp persists: it
-    appears in several consecutive readings. One sample bracketed by near-zero on
-    both sides means the light was on for less than 15 minutes, several separate
-    times, in the middle of the night.
-
-    Magnitude checks cannot see this. PAR is rated to 2000, so both 589 and 232
-    sit well inside spec, and a plain "no light at night" rule would flag
-    legitimate lighting -- SENS-07 shows small *consecutive* dusk readings that
-    are real.
-
-    So the test uses **duration**, not magnitude: a reading is a glitch when it
-    stands far above both of its neighbours.
+    Night light can be real: a lamp produces consecutive samples. This detector
+    instead requires a positive dark-hours reading that is far above both
+    neighbouring samples using `quiet`; range checks cannot distinguish that
+    temporal pattern.
     """
+    # The detector requires both adjacent values below `quiet * value`; boundary
+    # samples lack one neighbour and remain unflagged. It returns the sample and
+    # neighbour values so review can distinguish a transient from sustained light.
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
         g = g.sort_values("ts").set_index("ts")
@@ -247,10 +239,10 @@ def clock_offsets(sensor: pd.DataFrame, max_shift: int = 6) -> pd.DataFrame:
 
 
 def unit_scale(sensor: pd.DataFrame, channel: str = "soil_temp_c") -> pd.DataFrame:
-    """Channels written in different units show up as a constant scale vs peers.
+    """Measure per-device median absolute changes for a channel.
 
-    Jitter is the tell: Fahrenheit noise divided by 1.8 lands exactly on the
-    Celsius fleet's. A plain offset would match the mean and fail this test.
+    Differencing removes an additive calibration offset and preserves a
+    multiplicative unit scale.
     """
     jitter = (sensor.sort_values("ts").groupby("device_id")[channel]
               .apply(lambda s: s.diff().abs().median()))
@@ -260,23 +252,27 @@ def unit_scale(sensor: pd.DataFrame, channel: str = "soil_temp_c") -> pd.DataFra
 
 
 def detect_unit_outliers(sensor: pd.DataFrame, tol: float = 0.15) -> set:
-    """Devices whose jitter ratio marks them as a unit outlier.
+    """Return devices whose jitter ratio indicates a unit-scale outlier.
 
-    1.8 is the Fahrenheit signature: an affine transform scales differences by
-    its slope, so a Fahrenheit channel jitters 1.8x a Celsius one. A pure offset
-    would leave the jitter unchanged -- which is what separates a unit error
-    from a calibration offset.
-
-    Detection only. Correcting a fitted transform automatically would silently
-    mangle data, so the fix stays explicit in UNIT_FIXES and the two are
-    reconciled in audit().
+    Fahrenheit scales Celsius differences by 1.8; a calibration offset leaves
+    jitter unchanged. `tol` is the permitted distance from the fleet ratio of
+    1. Detection stays separate from `UNIT_FIXES`, because automatic fitted
+    conversions can silently damage a valid device.
     """
+    # Ratios use each device's median absolute consecutive difference against the
+    # fleet median. A device farther than `tol` from 1 is returned for explicit
+    # review; this function never selects a correction.
     scale = unit_scale(sensor)
     return set(scale.loc[scale["ratio_vs_fleet"].sub(1).abs() > tol, "device"])
 
 
 def screen_drift(sensor: pd.DataFrame, channels, days: int = 7) -> pd.DataFrame:
-    """Channels whose recent level has left their own historical band."""
+    """Screen channel levels against their own early baseline.
+
+    Resample to daily means, compare the first and last `days` medians, then
+    scale the shift by median absolute day-to-day change. A channel needs 14
+    daily observations so both windows have evidence; zero noise has no ratio.
+    """
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
         daily = g.sort_values("ts").set_index("ts")[list(channels)].resample("D").mean()
@@ -293,9 +289,8 @@ def screen_drift(sensor: pd.DataFrame, channels, days: int = 7) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("shift_vs_own_noise", ascending=False)
 
 
-#: What each log type should do to which channel, and in which direction.
-#: `None` means the event is not directional -- a repot disturbs the probe
-#: without pushing any channel a particular way.
+#: Expected channel response and direction for each log type. `None` is
+#: non-directional.
 LOG_EXPECTATION = {
     "watering":    ("soil_moisture_vwc", "rises"),
     "fertilising": ("ec_us_cm",          "rises"),
@@ -303,42 +298,28 @@ LOG_EXPECTATION = {
     "repotting":   (None,                "some channel steps"),
 }
 
-#: Which way a light log should move the daily light peak. "Rotated toward the
-#: light" is absent on purpose: rotating a plant does not change its distance
-#: from the window, so no direction is implied and it cannot be tested.
+#: Light phrases with a testable peak direction. Rotation has no implied
+#: direction because distance from the window is unchanged.
 LIGHT_DIRECTION = {"Moved closer to window": +1, "Too much direct sun, moved back": -1}
 
 
 def log_alignment(sensor: pd.DataFrame, mapping: pd.DataFrame,
                   contextual: pd.DataFrame, window_h: int = 6,
                   sigma: float = 3.0) -> pd.DataFrame:
-    """Does each log type coincide with the change ITS OWN sensor should show?
+    """Test each logged event against its expected sensor response.
 
-    Every log type names a physical event, so each has a channel that ought to
-    respond. F11 was first claimed from the **watering leg alone** -- one of four
-    -- and generalising from one case is the mistake this project exists to
-    catch. All four are tested here, and each row states what it expects.
-
-    The threshold is `sigma` x that channel's own step noise, so it scales: 1
-    uS/cm means nothing against EC's noise of ~57, while it is a real jump in
-    moisture whose noise is ~0.14. One absolute threshold cannot serve both, and
-    tuning one per channel by hand would be a fitted result.
-
-    Every probe on a plant is tested, and a log counts as matched if ANY of them
-    responded. Testing only the first device silently ignores the second probe on
-    a two-sensor plant, and for UP-1001 that changes the answer.
-
-    What it CANNOT do is attribute a log to a probe: the log carries no device
-    id, so on a two-sensor plant "the user watered" has no unambiguous device to
-    attach to. That is F9.
+    The `sigma` threshold uses each channel's own step noise, so EC and moisture
+    do not share an arbitrary absolute threshold. Every mapped probe is tested;
+    a log matches when any probe responds. Logs lack device ids, so the result
+    cannot attribute a response to one probe.
     """
+    # For light logs, test phrase-specific daily peaks because the two supported
+    # phrases expect opposite directions. Repotting compares 24-hour means;
+    # directional events inspect changes in `window_h` after the log.
     rows = []
     for log_type, (channel, expectation) in LOG_EXPECTATION.items():
         logs = contextual[contextual["log_type"] == log_type]
-        # LIGHT is reported PER PHRASE, because the phrases imply opposite
-        # directions. "Moved closer to window" should raise the light peak;
-        # "Too much direct sun, moved back" should lower it. Collapsing them into
-        # one count hides the contradiction, which is the actual finding.
+        # Report light phrases separately because they imply opposite directions.
         groups = ([(text, logs[logs["text"] == text])
                    for text in sorted(set(logs["text"]) & set(LIGHT_DIRECTION))]
                   if log_type == "light" else [("", logs)])
@@ -424,19 +405,21 @@ def join_fanout(sensor: pd.DataFrame, contextual: pd.DataFrame,
 
 
 def frozen_windows(sensor: pd.DataFrame, min_run: int = FROZEN_MIN_RUN) -> pd.DataFrame:
-    """Every run of an unchanged value long enough to be a dead channel.
+    """Find unchanged runs long enough to indicate a dead channel.
 
-    Channel-aware, because an unchanged value is only evidence of a dead sensor
-    if the channel COULD have moved. `LEGITIMATE_PLATEAU` names the values a
-    channel may honestly rest at for hours -- PAR sits at zero all night, so a
-    long run of zeros is a dark pot, not a fault. Treating that as frozen nulled
-    52 real measurements in a fixture.
+    `min_run` defaults to `FROZEN_MIN_RUN`. `LEGITIMATE_PLATEAU` excludes values
+    that a channel may honestly hold, including nighttime PAR at zero. A frozen
+    run records its device, channel, first and last timestamps, sample count,
+    and fixed value for cleaning.
 
     ponytail: a light sensor that dies at exactly 0 is therefore missed here. The
     check that would catch it is a daytime-zero test -- PAR at 0 while the same
     device's own history shows light at that hour -- which is a second detector,
     not a wider bound. No device in this sample is affected.
     """
+    # Grouping on changes identifies runs independently for each device and
+    # channel. A plateau listed in `LEGITIMATE_PLATEAU` skips only when every
+    # reading in the run equals that allowed value.
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
         g = g.sort_values("ts")
@@ -541,7 +524,10 @@ FINDINGS = [
      "against moisture 0.201 and EC -0.005. Moisture is an order of magnitude "
      "lower because each pot is its own reservoir",
      "medium", "artefact - shared or generated ambient series",
-     "do not use 'differs from the fleet' as an anomaly test for temp/light/humidity"),
+     "use the fleet as the reference for the shared channels -- a deviating device "
+     "is visible against a tight signal -- and read a change common to all eight "
+     "as one event, not eight faults. Leave temp/light/humidity peer tests usable; "
+     "ask product (D10) whether these devices really share one environment"),
 
     ("F13", "substrate_label is a snapshot with no effective dating", "UP-1006",
      "one label per device for the whole window, yet UP-1006 logged "
@@ -560,14 +546,7 @@ def findings_frame() -> pd.DataFrame:
     return pd.DataFrame(FINDINGS, columns=FINDING_COLS)
 
 
-#: How each finding was caught, and the natural check that is *structurally
-#: blind* to it.
-#:
-#: The second column is the point. Every trap in this dataset defeats at least
-#: one obvious test, which is why the detector set is orthogonal rather than
-#: deep -- eight different questions about the same rows, not one question
-#: asked eight ways. A check that repeats an existing angle adds nothing; only
-#: a new angle finds a new class of defect.
+#: How each finding was caught and the check structurally blind to it.
 DETECTION_COVERAGE = [
     ("F1", "Fahrenheit temperature", "jitter ratio = 1.8 (the F signature)",
      "correlation -- affine-invariant, blind to scale"),
@@ -608,13 +587,12 @@ def detection_coverage_frame() -> pd.DataFrame:
 
 def ec_drift_fit(sensor: pd.DataFrame, device: str = "SENS-03",
                  sigma: float = 3.0) -> dict:
-    """Where a device's EC starts climbing, and how fast.
+    """Fit EC drift from its detected onset.
 
-    F4's "136 uS/cm/day at R2=0.99" was HARDCODED -- running the code printed the
-    same string rather than recomputing it, so the number was reproducible only in
-    the weakest sense. The whole-record slope is roughly half that, because the
-    device sits flat for ten days before the ramp starts; the onset has to be
-    found before the ramp can be measured at all.
+    The initial quarter establishes a baseline. A point must exceed that median
+    by `sigma` baseline step deviations before it starts the ramp. The returned
+    ramp slope and R² describe only post-onset data; the whole-record rate remains
+    available to show how the initial flat period changes the estimate.
     """
     g = sensor[sensor["device_id"] == device].sort_values("ts")
     ec = g["ec_us_cm"]
@@ -636,17 +614,12 @@ def ec_drift_fit(sensor: pd.DataFrame, device: str = "SENS-03",
 
 
 def cross_device_correlation(sensor: pd.DataFrame, channels=None) -> pd.DataFrame:
-    """Mean pairwise correlation between devices, per channel.
+    """Mean pairwise correlation between devices by channel.
 
-    F12 claimed temp r=0.974, light r=0.998, humidity r=0.946 against moisture
-    r=0.103 -- and until this existed, NOTHING IN THE CODE COMPUTED THOSE. They
-    were transcribed from a one-off analysis, which is a claim supported by
-    nothing a reader can re-run.
-
-    The point of the number: for the shared ambient channels, "this device
-    differs from the fleet" is meaningless, because every device carries the
-    same series. For moisture it is meaningful -- each pot is its own reservoir.
-    That difference decides which anomaly tests are legal.
+    Pivoting aligns readings at each timestamp, then the upper triangle removes
+    self-correlation and duplicate pair directions. Shared ambient channels give
+    a fleet reference for device deviations; moisture remains more local to each
+    pot. A fleet-wide change is one event, rather than eight simultaneous faults.
     """
     channels = CHANNELS if channels is None else channels
     rows = []
@@ -661,14 +634,11 @@ def cross_device_correlation(sensor: pd.DataFrame, channels=None) -> pd.DataFram
 
 
 def rise_timing(sensor: pd.DataFrame, threshold: float = 1.0) -> pd.DataFrame:
-    """Where on the clock a moisture rise actually lands.
+    """Count moisture rises above `threshold` by clock minute.
 
-    F11's corroborating number -- "the rises land on the hour, 35 of 35" -- was
-    transcribed, and the denominator was wrong: it is 35 of 37 excluding SENS-08.
-    The point survives, and is the reason to compute it rather than remember it.
-
-    A physical watering event does not care what minute it is. A rise landing
-    exactly on the hour is a generator or scheduler artefact, not a plant.
+    The output is evidence about timing, not an irrigation detector. A physical
+    watering event is not tied to a clock minute; repeated :00 rises indicate a
+    generator or scheduler artefact.
     """
     rows = []
     for device, g in sensor.groupby("device_id", sort=True):
@@ -681,13 +651,11 @@ def rise_timing(sensor: pd.DataFrame, threshold: float = 1.0) -> pd.DataFrame:
 
 def colocated_correlation(sensor: pd.DataFrame, mapping: pd.DataFrame,
                           channel: str = "soil_moisture_vwc") -> pd.DataFrame:
-    """Correlation between two probes on the SAME plant.
+    """Correlate probes mapped to the same plant.
 
-    F10's numbers (r = -0.076 and +0.140) were transcribed from a one-off
-    analysis -- nothing in the code computed them. Two probes in one pot share a
-    water reservoir, so they must move together; a near-zero r is evidence that
-    they are not in one pot, or that the mapping is wrong. Either way the
-    two-sensor question stays open (D11).
+    Each pair aligns by timestamp and drops missing values before correlation.
+    Co-located probes should share a water reservoir; near-zero correlation
+    leaves the mapping or placement unresolved.
     """
     rows = []
     for plant, g in mapping.groupby("user_plant_id", sort=True):
@@ -703,9 +671,7 @@ def colocated_correlation(sensor: pd.DataFrame, mapping: pd.DataFrame,
     return pd.DataFrame(rows)
 
 
-#: One line per evidence table: what question it answers. Keyed by the same title
-#: `evidence_tables` uses, so the run log and the notebook cannot disagree about
-#: what a column means -- and so an output is readable without reading the code.
+#: Evidence-table descriptions keyed by their rendered title.
 EVIDENCE_NOTES = {
     "declared grain violated":
         "rows sharing a key. Identical payloads are a redelivery; differing ones "
@@ -742,7 +708,8 @@ EVIDENCE_NOTES = {
         "F11 was first claimed from the watering leg alone.",
     "cross-device correlation":
         "mean pairwise r between devices, per channel. High = one shared ambient "
-        "signal, so 'differs from the fleet' is not a usable test there.",
+        "signal, so a deviating device stands out against a tight reference -- "
+        "and a change common to every device is one event, not eight faults.",
     "where a moisture rise lands":
         "the minute each rise falls on. A real watering does not care what minute "
         "it is; rises on :00 are a scheduler.",
@@ -757,11 +724,7 @@ EVIDENCE_NOTES = {
 
 def evidence_tables(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.DataFrame,
                     images: pd.DataFrame) -> dict:
-    """Every detector's output, keyed by what it shows.
-
-    Returns data only -- main() prints it, the notebook displays it. Same rows
-    either way, so the two artifacts cannot drift.
-    """
+    """Return each detector output keyed by its rendered title."""
     return {
         "declared grain violated": pd.DataFrame([grain_violations(sensor)]),
         "joins that multiply rows": join_fanout(sensor, contextual, images, mapping),
@@ -772,12 +735,11 @@ def evidence_tables(sensor: pd.DataFrame, mapping: pd.DataFrame, contextual: pd.
             ["device", "channel", "samples", "frozen_at", "first", "last"]],
         "clock offsets": clock_offsets(sensor),
         "temperature unit scale": unit_scale(sensor),
-        # top 6 of 40 by drift ratio; the tail is ordinary day-to-day movement
+        # Top 6 of 40 by drift ratio; the tail is ordinary day-to-day movement.
         "drift vs own history (top 6 of 40)": screen_drift(sensor, CHANNELS).head(6),
         "watering logs vs sensor": log_alignment(sensor, mapping, contextual),
-        # On ALIGNED time. SENS-07's raw clock is two hours off, which drags
-        # every shared-ambient correlation down to ~0.8 and conflates this
-        # finding with a separate clock defect (F2).
+        # Use aligned time so SENS-07's two-hour offset does not lower ambient
+        # correlations or conflate the result with F2.
         "EC drift fit": pd.DataFrame([ec_drift_fit(sensor)]),
         "cross-device correlation": cross_device_correlation(align_clocks(sensor)),
         "co-located probes, same plant": colocated_correlation(sensor, mapping),

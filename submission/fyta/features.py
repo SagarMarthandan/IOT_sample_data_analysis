@@ -1,43 +1,39 @@
 """Task 5: one time-indexed table per plant.
 
-Grain is `(user_plant_id, ts_aligned)`, declared and asserted rather than
-assumed.
+Grain is `(user_plant_id, ts_aligned)`, with one row whenever at least one
+mapped device reports. `gap_minutes` exposes missing shared slots on the next
+reported row, so the table retains delivered observations without fabricating
+an interpolation across a sensor outage.
 
-Two structural facts about this dataset decide the shape of the table.
+Two-probe plants retain device-id-ordered positional columns. Device ids travel
+with every row, readings are never averaged, and `vwc_delta` exposes the gap.
+`vwc_pct_1/2` ranks each cleaned reading inside that device's trailing recent
+range. It compares readings on a within-device scale without using future values
+in an earlier feature row, while leaving the raw VWC values available.
 
-**Two probes on one plant.** UP-1001 and UP-1003 have two devices each (F10,
-still unresolved). Averaging them is not an option -- it would invent a moisture
-value describing neither pot. So each device gets a positional column, the
-device ids travel *with the row*, and their disagreement is exposed as
-`vwc_delta`. That disagreement is the entire point of a second probe: it is
-fault detection, and averaging destroys it.
+The table joins cleaned sensor channels to current plant metadata. Metadata
+requires one mapping per device and one substrate per plant before the merge.
+Logs and images remain sparse events: projecting 49 logs or 28 photos across
+11,903 fifteen-minute rows would turn one event into many claims. Consumers can
+join them as-of with an explicit tolerance and preserve no recent event
+separately from no event. This table does not fill the F7 outage, resolve F10,
+or infer effective dates for F13 metadata.
 
-**VWC is only comparable within a substrate.** `vwc_pct_1/2` is the reading's
-rank inside that device's own recent range, which is what makes it comparable
-*across* plants. The window is TRAILING and that is not a detail -- ranking over
-the whole window would judge a day-1 reading against day-21 data, which is
-leakage the moment this table feeds a model.
+    `n_sensors` is the mapped probe count. Each output row carries all device
+    slots, cleaned feature slots, species, and substrate so consumers can trace a
+    value back to a reporting instrument. A substrate label is current metadata,
+    not historical evidence at each timestamp.
 
-**Scope.** This table unifies the cleaned sensor channels and the plant metadata.
-It deliberately does NOT join in the logs or the images. There are 49 log rows
-and 28 photos against 11,903 fifteen-minute rows: spreading a log across every
-row in its neighbourhood would duplicate it hundreds of times and turn a sparse
-event into a claim about every slot, and a photo the model can only evaluate once
-cannot be sampled at 15-minute resolution. Production consumers should join both
-**as-of**, with an explicit tolerance, and treat "no recent log" as a distinct
-state from "no log". That is a modelling decision, and this table does not
-silently make it.
+    `FEATURE_COLS` shortens repeated channel names before slot suffixes. The
+    original raw columns remain upstream in the cleaned sensor frame.
 
-What this table also deliberately does NOT do: fill the 48.5-hour outage (F7),
-resolve the two-probe question (F10), or date the substrate label (F13). Each is
-visible on the row instead of hidden -- see `gap_minutes`, `vwc_delta`, and the
-verdict in the run log.
+    `gap_minutes` is computed after sorted plant-time rows, so it describes
+    elapsed reporting time for the same plant.
 """
 
 import pandas as pd
 
-#: Source column -> feature name. Short, because every one of these gets
-#: suffixed with a device slot and `soil_moisture_vwc_clean_2` is unreadable.
+#: Source column to concise per-device feature name.
 FEATURE_COLS = {
     "soil_moisture_vwc_clean": "vwc",
     "vwc_pct": "vwc_pct",
@@ -51,38 +47,33 @@ FEATURE_COLS = {
 #: Per-device columns, before the slot suffix is applied.
 KEEP = list(FEATURE_COLS.values())
 
-#: 7 days of 15-minute readings, and 1 day of warm-up. See the module docstring.
+#: 7 days of 15-minute readings with 1 day of warm-up.
 WINDOW, MIN_PERIODS = 672, 96
 
 
 def plant_features(sensor: pd.DataFrame, mapping: pd.DataFrame,
                    window: int = WINDOW, min_periods: int = MIN_PERIODS) -> pd.DataFrame:
-    """Build the table. `sensor` must be the CLEANED frame from Task 3.
+    """Build the plant-time feature table from the cleaned sensor frame.
 
-    Returns one row per (plant, aligned timestamp) wherever at least one of the
-    plant's devices reported. Slots where nothing reported are absent rows, made
-    visible on the following row by `gap_minutes`.
+    `window` and `min_periods` control per-device trailing VWC percentiles.
+    Every sensor device requires one mapping entry before the merge. `pivot`
+    enforces a unique `(plant, timestamp, slot)` shape, while sorted device ids
+    make positional slots reproducible. Slots with no reporting device remain
+    absent rather than becoming synthetic rows.
     """
-    df = sensor.copy()          # `_pct` below must not leak into the caller's frame
-    # VWC is the substrate-converted channel, so it is the one that needs a
-    # within-device rank to mean anything across plants.
+    df = sensor.copy()          # `_pct` must not leak into the caller's frame
+    # Rank within device: VWC is only comparable within a substrate.
     df["vwc_pct"] = (df.groupby("device_id")["soil_moisture_vwc_clean"]
                        .transform(lambda s: s.rolling(window, min_periods=min_periods)
                                                .rank(pct=True)))
     df = df.rename(columns=FEATURE_COLS)
 
-    # Positional slots, assigned in device-id order so the table is
-    # reproducible. A positional column whose meaning changes between plants
-    # would be a trap, so `device_1/2` travel with every row.
+    # Stable device-id slots keep positional columns and `device_1/2` meaningful.
     slots = mapping.sort_values(["user_plant_id", "device_id"])
     slots["slot"] = slots.groupby("user_plant_id").cumcount() + 1
     assert not slots.duplicated(["device_id"]).any(), \
         "a device maps to more than one plant; the slot join would fan out"
-    # The uniqueness assert above guards the RIGHT side of the join. This guards
-    # the left: an inner merge silently drops sensor rows for any device the
-    # mapping does not mention, so one missing mapping row deletes a whole
-    # device's history with no error. Both directions, or the "unified" claim is
-    # only as good as the table nobody checked.
+    # Check both join sides: unmapped sensor rows would be silently dropped.
     unmapped = sorted(set(sensor["device_id"]) - set(slots["device_id"]))
     assert not unmapped, (
         f"sensor rows for {unmapped} have no mapping row, so an inner merge would "
@@ -90,8 +81,7 @@ def plant_features(sensor: pd.DataFrame, mapping: pd.DataFrame,
     df = df.merge(slots, on="device_id")
 
     keys = ["user_plant_id", "ts_aligned"]
-    # `pivot` raises on duplicate (index, column) pairs, so the grain is checked
-    # by construction rather than by a rule I have to remember.
+    # `pivot` rejects duplicate (index, column) pairs.
     wide = df.pivot(index=keys, columns="slot", values=KEEP)
     wide.columns = [f"{c}_{s}" for c, s in wide.columns]
     out = wide.reset_index()
@@ -103,12 +93,10 @@ def plant_features(sensor: pd.DataFrame, mapping: pd.DataFrame,
             slots.loc[slots["slot"] == s].set_index("user_plant_id")["device_id"])
 
     if "vwc_2" in out:
-        # The fusion signal, kept rather than averaged away.
+        # Keep the two-probe disagreement.
         out["vwc_delta"] = (out["vwc_1"] - out["vwc_2"]).abs()
 
-    # Point-in-time: these are today's values. `substrate_label` is a calibration
-    # parameter with no effective dating (F13), so a consumer must not read it as
-    # "true at this timestamp". Asserted to be one per plant so the merge is safe.
+    # Point-in-time substrate metadata has no effective dating (F13).
     meta = (mapping.merge(sensor.groupby("device_id")["substrate_label"].first(),
                           on="device_id")
                    .groupby("user_plant_id")
@@ -138,27 +126,17 @@ def assert_grain(features: pd.DataFrame) -> int:
 
 
 def plant_summary(features: pd.DataFrame) -> pd.DataFrame:
-    """Per-plant row counts against the grid each plant was due.
+    """Summarize plant rows against the observed grid.
 
-    `missing` exists so a short plant explains its own row count. Without it a
-    plant with absent rows is indistinguishable from a filter bug -- which is a
-    question a reader asked of UP-1004, whose 193 absent rows are the 48.5-hour
-    outage (F7).
-
-    `probes_filled` is a different claim and is named for it: the share of rows
-    PRESENT where **every** probe the plant has carries a moisture value.
-    UP-1004 is missing 9.6% of its grid and is fully filled within the part it
-    delivered.
-
-    It is deliberately not the share of the grid, and deliberately not probe 1
-    alone. Probe 1 alone reports UP-1003 at 0.976 while its second probe is frozen
-    for 1,344 slots (F3); judged on both probes the plant is 0.324. A column that
-    says 0.976 there is not conservative, it is wrong.
+    `missing` compares rows with slots between observed endpoints. `probes_filled`
+    is the share of delivered rows where every plant-owned probe has moisture.
+    It excludes non-existent device slots and remains distinct from grid coverage
+    or a first-probe-only measure. `longest_gap_h` is measured from consecutive
+    aligned feature timestamps.
     """
     n = int(features["n_sensors"].max())
     vwcs = [f"vwc_{i}" for i in range(1, n + 1)]
-    # A plant with one probe must not be judged on its empty `vwc_2` column, so
-    # columns the plant does not own pass automatically.
+    # Columns for probes a plant does not own pass automatically.
     own = pd.DataFrame({c: features["n_sensors"] >= i + 1 for i, c in enumerate(vwcs)},
                        index=features.index)
     filled = (features[vwcs].notna() | ~own).all(axis=1)

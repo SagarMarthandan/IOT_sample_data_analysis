@@ -2,92 +2,68 @@
 
 **Sagar Marthandan**
 
-Three weeks, 8 soil sensors, ~16,000 readings, 49 user notes, 28 plant photos.
-`uv run fyta_pipeline.py` reproduces everything below.
+Three weeks, 8 soil sensors, 15,950 readings, 49 user notes, 28 plant photos.
+`uv run fyta_pipeline.py` reproduces every number below (`out/run.log`);
+`uv run test_gates.py` runs 18 regression checks, each verified to fail when its
+fix is reverted; `fyta_analysis.ipynb` executes from a fresh kernel.
 
-## Five things that matter
+## Findings
 
-**1. A sensor stopped measuring, and nothing says so.** Sensor 6's moisture reads
-exactly 25.01 for fourteen days — 1,344 readings — and looks normal. What gives it
-away is that its *own* four other channels kept moving.
+**SENS-06 moisture stayed at 25.01 for 1,344 readings** — fourteen days — while
+its other four channels kept moving. I nulled that interval and kept a reason per
+row. The cause is unresolved.
 
-**2. A two-day gap that leaves no trace.** One sensor is missing 193 readings. No
-blank cells, no errors — the rows are simply absent. Only the expected-slot count
-reveals it.
+**SENS-07 reads Fahrenheit and runs two hours off local time.** Its temperature
+scale and offset fit the Fahrenheit conversion, and aligning its light series
+against the fleet supports a two-hour clock offset (r 0.802 → 0.9997).
+Correlation alone sees neither: it correlates at 0.9843 with its peers while in
+the wrong unit.
 
-**3. A sensor in the wrong units, on the wrong clock.** Sensor 7 read Fahrenheit
-and ran two hours out. Neither is visible in the values — Fahrenheit only from
-jittering 1.8× faster than its peers, the clock only from its daylight pattern.
+**SENS-05 missed 193 slots (48.5 h) with no empty cells anywhere** — the rows are
+absent, so only an expected-slot count finds them. **SENS-08 delivered 15
+duplicate rows** with identical payloads, so deduplicating them is lossless.
+**Plant IDs repeat:** joining logs or photos to the device map expands 49 rows to
+67 and 28 to 35.
 
-**4. One join is safe, the next is not.** Plant IDs repeat, so joining notes or
-photos multiplies rows — 49 become 67. The trap is that the *first* join works.
+Two questions stay open: SENS-03's EC climbs in a straight line from 06-11 with
+no logged cause, and the two-sensor plants disagree (r −0.08, +0.14), which
+depth, placement or a failed probe would each explain.
 
-**5. Two pots have two sensors each, and the pairs disagree.** Their moisture
-correlates at −0.08 and +0.14 — flat to negative. What that rules out is *averaging
-them*: the average describes neither pot and discards the disagreement. What it does
-**not** establish is why — depth, placement, a failed probe and a wrong mapping
-all produce this. **I could not settle it from the data alone.**
+## Treatment and outputs
 
-## Three decisions I would defend
+Raw columns are never edited. Corrections land in `_clean` columns beside them:
+physically impossible values are nulled and recorded in `out/qc_rejections.csv`,
+while values merely outside the published range are kept and flagged — 21% of
+SENS-04's readings sit above the 65% ceiling, and that excursion is the shape of
+its drying cycle. Nothing is clipped, averaged or interpolated.
 
-**Not everything out of range is wrong.** Impossible readings are removed and
-logged; merely unusual ones are *kept* and marked. Collapsing the two is how real
-events get deleted — one sensor has 431 unusual readings in long stretches.
+`out/plant_features.csv` (11,903 rows, grain `(user_plant_id, ts_aligned)`,
+asserted) carries the sensor channels and plant metadata. It excludes logs and
+photos: spreading 49 events and 28 photos across 15-minute rows would duplicate a
+sparse event hundreds of times. Both probes are kept, with `vwc_delta` between
+them.
 
-**Finding and fixing are separate jobs, checked both ways.** A detector with no fix
-is a warning nobody acts on; a fix with no detector rots. The gate proves every
-removed value was removed, *and* every flag matches a detector.
+## Cross-source result
 
-**Never average the two sensors on one pot** — the disagreement is the only reason
-to fit two probes.
+The image model's water-deficiency score tracks sensor dryness at r = 0.75 — the
+axis the sensor already measures — and one synthetic generator could have produced
+both, so independence is unestablished. Its other heads never exceed 0.06.
 
-## What I would never ship
+For the five fertilising logs, the selected windows established no corroboration:
+screening five events at 3σ against each probe's own noise is low-power, and the
+log is not a known event time. A wider window would have made UP-1002 look
+confirmed, from SENS-03's drift rather than chemistry.
 
-- **Averaged sensors on one pot** — the disagreement *is* the signal.
-- **A filled-in gap** — a user note sits inside those missing two days. An
-  *expected-but-absent* row is honest; an interpolated one is not.
-- **Trimmed readings** — 107 % moisture is a finding, not a typo to clip.
-- **Deleted odd readings** — eight 1am light readings are out of pattern but inside
-  range. Someone may have switched a lamp on. Kept, marked.
-- **A safety check that cannot fail.**
+## Limits and next steps
 
-## Where I was wrong
+Completeness is measured against each device's observed span, not an installation
+window; grid spacing and phase are asserted, boundary slots are not. The
+frozen-channel rule misses a light sensor that dies at exactly zero, and SENS-03's
+drift is not flagged per row. Unit fixes, clock offsets and ranges rest on
+published specs and the substrate conversion curve, which FYTA can confirm (D1,
+D7).
 
-Two external reviews found ten real defects *after* I had reported the work sound.
-All are fixed, each with a test that fails if the fix is undone. The four worst:
-
-- **The publishing gate could not fail.** It asked "is any value missing?", which
-  any missing value satisfies. I restored 1,344 known-bad readings; it passed.
-- **Two rows on one key were resolved by coin-flip.** Disagreeing duplicates were
-  dropped to one, silently. Both are now quarantined.
-- **A falling reading counted as agreement** — a large conductivity *drop* scored
-  as support for "fertiliser raised conductivity".
-- **A frozen-channel rule deleted real data.** It nulled any long unchanged run,
-  including legitimate darkness — 52 good light readings in a fixture.
-
-One review also caught a claim that was simply wrong: I had written that a drying
-*rate* escapes the substrate calibration. It does not — differentiating removes the
-offset and keeps the gain, and the gain is what differs between soils.
-
-**The pattern: I checked by re-reading my own writing, not by re-running.**
-
-## Two results that came back negative
-
-**The photo model cannot be validated here.** Its water-deficiency score tracks
-sensor dryness at r = 0.75 — the one axis the sensor already measures — and the
-dataset is synthetic, so the agreement may be a shared generator rather than two
-instruments. The heads that *could* disagree (fungus, pests) never exceed 0.06.
-A head that never fires can neither confirm nor contradict.
-
-**Triangulation does not work, and not because the effect is weak.** Across five
-fertilising events no probe's conductivity moves outside its own step noise — and
-the light logs *contradict*: "moved closer to window" moves the daily peak **down**
-by 4.4.
-
-## What I would do next
-
-1. **Put the checks in the build** — every new check gets a test that fails without it.
-2. **Move device settings into an effective-dated registry.** Unit fixes, clock
-   offsets and specs are code today; plant, soil and species are already data.
-3. **Settle the two-sensor question** — it decides how the modelling table is built.
-4. **Version each derived value.** Moisture comes from a curve with no version.
+For production: one compacted Parquet object per device per day ($15/month of
+requests at 100k devices), with the per-device-window checks running hourly off
+the ingestion buffer — hourly lake files cost 24× that to hold four readings each.
+Arithmetic in `docs/PIPELINE_DESIGN.md` §5.

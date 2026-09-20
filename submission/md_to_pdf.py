@@ -14,18 +14,18 @@ HTML = Path("/tmp/writeup.html")
 PDF = Path("WRITEUP.pdf")
 
 CSS = """
-@page { size: A4; margin: 6mm 7mm; }
+@page { size: A4; margin: 11mm 12mm; }
 * { box-sizing: border-box; }
 body {
   font-family: "Latin Modern Roman", "LM Roman 10", "Computer Modern", serif;
-  font-size: 9.3pt; line-height: 1.25; color: #16181d; margin: 0;
+  font-size: 10.6pt; line-height: 1.34; color: #16181d; margin: 0;
   -webkit-font-smoothing: antialiased;
 }
-h1 { font-size: 17pt; margin: 0 0 1mm; letter-spacing: -0.2pt; }
-h2 { font-size: 11.2pt; margin: 2.4mm 0 1.2mm; padding-bottom: 0.7mm;
+h1 { font-size: 18pt; margin: 0 0 1mm; letter-spacing: -0.2pt; }
+h2 { font-size: 12.4pt; margin: 3.4mm 0 1.6mm; padding-bottom: 0.8mm;
      border-bottom: 1px solid #dcdfe4; }
-h3 { font-size: 10pt; margin: 4mm 0 1.5mm; }
-p { margin: 0 0 1.6mm; }
+h3 { font-size: 11pt; margin: 4mm 0 1.5mm; }
+p { margin: 0 0 2mm; }
 hr { border: none; border-top: 1px solid #e4e7ec; margin: 3mm 0; }
 table { border-collapse: collapse; width: 100%; margin: 2mm 0 3mm;
         font-size: 9.0pt; page-break-inside: avoid; }

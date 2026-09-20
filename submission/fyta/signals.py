@@ -1,7 +1,7 @@
-"""Tasks 8 and 9 -- the optional stretches.
+"""Optional Tasks 8 and 9: drydown and structured log signals.
 
-One derived signal from the cleaned sensor data, and one lookup that turns the
-user's log text into structured values.
+The drydown output is derived from cleaned VWC; the log output parses only
+values the supplied text states.
 
 ponytail: both live here because neither is load-bearing. The brief marks them
 optional, and dropping either removes this file without touching anything else.
@@ -15,41 +15,34 @@ import pandas as pd
 
 def drydown_rate(sensor: pd.DataFrame, window: int = 96,
                  min_periods: int = 48) -> pd.DataFrame:
-    """%VWC lost per day, from the trailing median of consecutive changes.
+    """Estimate %VWC lost per day from trailing median changes.
 
-    A RATE DOES NOT BYPASS CALIBRATION. An earlier version of this docstring
-    claimed "this pot loses 2 %/day" carries across substrates because
-    differentiation removes the offset. That is wrong, and it is arithmetic, not
-    opinion: if the substrate curve is `reported = a * true + b`, then
+    Group by device before differencing, then divide each VWC change by elapsed
+    days. Calibration still applies: for `reported = a * true + b`,
+    differentiation removes `b` but retains `a`. Rates therefore compare within
+    a probe under stable conditions, rather than across substrates.
 
-        d(reported)/dt = a * d(true)/dt
+    A watering step reverses the sign and can dominate a mean. The trailing
+    median resists those events. The window counts readings rather than elapsed
+    time, so `drydown_asof` records the last valid timestamp when the current
+    VWC value is null.
 
-    Differentiation kills `b` and keeps `a`. The gain is exactly what differs
-    between coir and bark -- and for the logistic curves FYTA describes it is not
-    even constant, so the derivative moves with the local slope. A rate is
-    therefore comparable **within one probe under stable conditions**, which is
-    what it is for. Across substrates it inherits the same unresolved calibration
-    the level does (F13, D7).
+    `window=96` readings is one day; `min_periods=48` requires twelve hours.
 
-    MEDIAN, not mean. A watering event is a large jump in the other direction,
-    and a handful of them would swamp a mean. The median ignores them by
-    construction, so the signal stays a drying rate rather than an average of
-    drying and watering.
+    The returned frame contains `device_id`, `ts_aligned`,
+    `drydown_pct_per_day`, and `drydown_asof`. Consumers should compare
+    `drydown_asof` with their required freshness before treating the estimate as
+    current.
 
-    FRESHNESS IS NOT IMPLIED. The window counts trailing readings, so a rate can
-    be emitted while the CURRENT value is NULL -- 105 rows in this sample, on
-    SENS-04/06/08. That is deliberate (a gap still has a prior drying trend) but
-    it means the column is an estimate as of the last valid reading, not a
-    measurement now. Compare it against the device's latest timestamp before
-    using it.
+    A null current VWC can still have a valid trailing estimate. The as-of
+    timestamp makes that distinction explicit without filling the gap.
 
-    window=96 readings is one day; min_periods=48 refuses to report a rate from
-    less than twelve hours.
+    Gaps change elapsed-time differences without changing the rolling reading
+    count, which the output reports rather than hides.
     """
     df = sensor[["device_id", "ts_aligned", "soil_moisture_vwc_clean"]].copy()
     by_dev = df.groupby("device_id")
-    # Per DAY, not per step: a gap would otherwise fake a spike. Dividing by the
-    # real elapsed time makes the outage harmless rather than loud.
+    # Divide by elapsed days so gaps do not create rate spikes.
     gap_days = by_dev["ts_aligned"].diff().dt.total_seconds() / 86400
     df["_rate"] = -by_dev["soil_moisture_vwc_clean"].diff() / gap_days
 
@@ -60,9 +53,7 @@ def drydown_rate(sensor: pd.DataFrame, window: int = 96,
         df.groupby("device_id")["_rate"]
           .transform(lambda s: s.rolling(window, min_periods=min_periods).median()))
 
-    # Freshness, because the window counts trailing READINGS and the current one
-    # may already be NULL -- 105 rows across SENS-04/06/08. Without this column
-    # the stale rate is indistinguishable from a live one.
+    # Expose the last valid timestamp for a rate whose current value is null.
     df["drydown_asof"] = (df["ts_aligned"]
                           .where(df["soil_moisture_vwc_clean"].notna())
                           .groupby(df["device_id"]).ffill())
@@ -71,9 +62,7 @@ def drydown_rate(sensor: pd.DataFrame, window: int = 96,
 
 # ------------------------------------------------- Task 9: log text, structured
 
-#: Watering intensity, read off the phrase. An ORDINAL, not a measurement: the
-#: whole vocabulary is 14 phrases and only ONE of them carries a volume, so
-#: anything finer would be invention.
+#: Ordinal watering intensity from 14 phrases; only one carries a volume.
 INTENSITY = {
     "Quick water": 1,
     "Watered a bit, leaves drooping": 1,
@@ -88,23 +77,16 @@ VOLUME = r"~?\s*(\d+)\s*ml"
 
 
 def log_signals(contextual: pd.DataFrame) -> pd.DataFrame:
-    """Task 9: the log text as structured values.
+    """Map log text to the existing one-to-one `log_type` vocabulary.
 
-    A LOOKUP, NOT A CLASSIFIER. The vocabulary is fourteen phrases over 49 rows
-    and the phrase-to-`log_type` mapping is already one-to-one, so a model would
-    be a more expensive way to write a dict -- and it would need labelled data
-    nobody has. (AGENTS.md §12: look for the vocabulary before building a
-    classifier on it.)
-
-    What this adds beyond the `log_type` column that already exists is a coarse
-    watering intensity and the one volume present. That is genuinely all the text
-    encodes. Note the limit this shares with everything else here: F11 showed the
-    logs do not align with the sensors in time, so a cleaner log is still not a
-    timestamped event.
+    The 14-phrase vocabulary across 49 rows does not require a classifier.
+    Output preserves the source log id, plant, text, and created time, then adds
+    coarse watering intensity and the stated volume where present. F11 limits
+    these fields to text interpretation: logs do not become timestamped sensor
+    events.
     """
     out = contextual[["log_id", "user_plant_id", "log_type", "text", "created_at"]].copy()
-    # Derive the mapping from the data, and ASSERT the property the lookup
-    # depends on -- that a phrase determines its type.
+    # Assert the phrase-to-type property required by the lookup.
     assert out.groupby("text")["log_type"].nunique().eq(1).all(), \
         "a phrase maps to more than one log_type, so this is not a lookup"
     out["intensity"] = out["text"].map(INTENSITY).astype("Int64")

@@ -1073,3 +1073,191 @@ says?" and "does the number compute?" — both passed, repeatedly. This one aske
 **"does the header describe what is computed?"** and **"is the stated reason
 actually true?"** Those are different questions, and no amount of re-running the
 same checks reaches them.
+
+---
+
+## The fourth review — the reassessment, and the holes re-reading could not find
+
+`second_opinion_astra.md` was re-read cold after the correction pass and returned
+R1–R6. **All six reproduced.** Two of them (R2, R3) were regressions introduced by
+the *previous* fix — the correction pass had added a check that could be satisfied
+without the behaviour it claimed to test, twice, in the same function.
+
+### What the reassessment found, and what verified it
+
+| Claim | How it was verified here |
+|:---|:---|
+| Notebook fails from a fresh kernel | `heads` consumed at cell 39, defined nowhere (50 cells scanned) |
+| Quarantine crashes on real input | `head["timestamp"] - Timedelta` on source TEXT; the test helper had been overwriting `timestamp` with the parsed column |
+| `A, A, B, B` on one key quarantines nothing | reproduced: 0 rows quarantined, arbitrary winner kept, audit passed |
+| Ledger preserved no payloads | `channel="(row)"`, `raw_value=NaN` — both payloads gone |
+| Audit accepts 2,016 deleted rows | inner-join value comparison over shared keys only |
+| Audit rejects a re-ordered frame | same check, compared positionally |
+| Flags moved to unrelated rows pass | count comparison (`8 == 8`) rather than key sets |
+| Omitting the frozen detector passes | every check reconciled *recorded* rejections |
+| A `NaN` probe score masks a valid one | `max()` kept the first element; `SENS-01 +nan, SENS-02 +8.84` |
+
+### What the fixes are
+
+- **Quarantine is decided per key group.** Lossless dedupe only where every payload
+  on the key agrees; otherwise every version is quarantined, with its payload
+  serialised into a new `row_payload` ledger column. `ts_aligned` is computed
+  *before* the duplicate branch, from `ts`, not from the source text.
+- **The audit accounts for every source row**: retained + losslessly deduped +
+  quarantined must equal the source, and the ledger's quarantined keys must match
+  the conflicting keys exactly.
+- **Values are compared after aligning by key**, so re-ordering is not an edit and a
+  deletion is.
+- **Flags are reconciled by key**, not by count.
+- **The frozen detector is re-run on the raw frame** inside the audit, so a cleaner
+  that never detects a window cannot pass.
+- **Probe scores must come from valid observations** (`notna().any()` per window),
+  and every probe reports an outcome in `leg_detail`, testable or not.
+
+### Corrections to the record, including one the reviews did not catch
+
+**The dark-hour flag was matched on the raw clock.** `clean()` detected spikes on an
+*aligned* frame and then matched `df["ts"]` — the device's own clock. On a device
+with a declared offset the flag would land on a different reading than the detector
+meant. It does not fire on this sample (SENS-08, the only device with spikes, has no
+offset — verified: the 8 detected spikes and the 8 flagged rows coincide), so it was
+a latent bug, not a wrong number. The count-based audit could never have seen it.
+Now both the detection and the match use the aligned frame.
+
+**`plant_features.csv` counts and the audit's check count are measured, not
+remembered.** 11,903 feature rows, 1,415 rejections, 15,935 cleaned rows, 21 audit
+checks, 18 regression checks. Each was read off the current run.
+
+**HANDOFF said 51 notebook cells; it had 50.** The cell that created `heads` was
+removed in the correction pass and the count was carried forward by hand. Now
+re-derived from the file: 51 cells, 21 code cells, 0 errors.
+
+### Verification this pass, and what each proves
+
+| Check | Result |
+|:---|:---|
+| `uv run fyta_pipeline.py` | exit 0 · 21 of 21 audit checks pass |
+| `uv run test_gates.py` | 18 of 18 · **each new check verified to FAIL when its fix is reverted** (7 mutations, one per defect) |
+| Notebook, fresh kernel | 51 cells, 21 code, 21 executed, **0 errors**, 2 figures |
+| Idempotency | re-running the whole pipeline reproduced **all 14 artifacts byte-for-byte** (md5) |
+| `data/` | unmodified (git clean on `data/`) |
+| Write-up | 1 A4 page, 533 words, 10.6 pt (was 783 words at 9.3 pt) |
+
+### The batching decision (R6)
+
+One policy, stated once: **one compacted Parquet object per device per day.**
+3 M PUTs/month = $15, so the total is **≈$190–450/month** with IoT Core. An hourly
+object holds four readings at this cadence and costs 24× the requests
+($533–792/month total) — that is the price of fresh *lake files*, not fresh
+dashboards. Lake freshness is therefore ≤ 1 day, and the per-device-window checks
+and the serving table run hourly off the ingestion buffer instead. The earlier
+"$200–500 envelope" was an estimate with no policy behind it; it is now derived.
+
+---
+
+## The prose pass — the editorial work the third review asked for
+
+The reviewer's closing section asked for a separate, authorised editorial pass, and
+named where each kind of reasoning belongs. What follows is what was cut, what was
+kept, and one correction that the pass itself introduced.
+
+### Where the prose was
+
+Measured before and after, submission-facing only (`docs/observations.md` and
+`HANDOFF.md` are the internal record and were left alone):
+
+| Artifact | Before | After | What it is now |
+|:---|---:|---:|:---|
+| `fyta/*.py` comments + docstrings | 6,057 w | 3,616 w | contracts, units, edge cases, non-obvious decisions, `ponytail:` markers |
+| `fyta_pipeline.py` print literals | 1,745 w | 940 w | counts, decisions, limits (run.log is 565 lines, was 647) |
+| `fyta_analysis.ipynb` markdown | 5,357 w | 4,245 w | evidence beside the interpretation it supports |
+| `docs/PIPELINE_DESIGN.md` | 3,754 w | 3,021 w | one flow, assumptions, failure handling, cost arithmetic |
+| `WRITEUP.md` (earlier in this session) | 783 w | 533 w | the hiring-review summary |
+
+That is ~17,700 words of submission prose down to ~12,300, at a larger type size in
+the PDF (10.6 pt against 9.3 pt).
+
+### The rule applied
+
+Each repeated explanation keeps **one** home, and code no longer retells review
+history:
+
+| Explanation | Kept in | Removed from |
+|:---|:---|:---|
+| Two probes, never averaged, `vwc_delta` | notebook §5a | module docstrings, pipeline print, findings `next` |
+| Nothing clipped, averaged or interpolated | `cleaning.py` module docstring | pipeline print, notebook §3a |
+| Impossible → null, out-of-spec → flag | `domain.py` `IMPOSSIBLE` block | pipeline print |
+| Which review found which defect, and what the old version did | here, and the tests that pin them | all module comments |
+| Task/section numbering | pipeline docstring index | notebook index |
+| Task 7 design and cost | `PIPELINE_DESIGN.md` | notebook §7 (now points at the doc) |
+
+Also removed: all-caps emphasis (`FLAGGED, NOT EMPTIED`, `KEY GROUP`, `A RISE, not
+a change`), pull-quotes, "X, not Y" setups where Y alone reads, and two of the
+reviewer's eleven named passages that had not been touched in the first sweep.
+
+### What was deliberately NOT cut
+
+- Every threshold, count, path, device id and reversal condition, including the
+  F4 drift arithmetic, F7's buffer/193-slot limit, the F12 fleet-reference rule,
+  `LEG_SIGMA`/`LEG_PROB`/`IMAGE_WINDOW_H`, `WINDOW`/`MIN_PERIODS`, and the
+  observed-span coverage ceiling with its activation-time prerequisite.
+- The `ponytail:` comments, verbatim, including the one naming the daytime-zero
+  blind spot in the frozen detector.
+- Test docstrings. A test that says what it protects against is the one place the
+  old defect belongs, and deleting it would leave the assertion unexplained.
+
+### Correction: the prose pass deleted a statement
+
+`cleaning.py` lost `df = df.drop(columns=["ts"])` when a comment above it was
+rewritten: the comment ("drop the working time column") survived and the statement
+did not. The pipeline failed loudly on the next run
+(`ValueError: column label 'ts' is not unique`, from `dark_hour_spikes` receiving a
+frame with two `ts` columns) and the line was restored.
+
+The mechanical audit that caught nothing else: for each module, every line with
+comments *and docstrings* removed was diffed against the same view of the previous
+commit. All remaining statement-level differences were attributable to this
+session's own R1–R6 edits, and `features.py`, `signals.py` and `domain.py` showed
+zero. Verification after the repair: 18/18 regression checks, pipeline exit 0, and
+**every CSV and figure byte-identical to the pre-prose run** — only `run.log`
+differs, because that is the artifact the pass rewrote.
+
+**The lesson repeats the session's other one:** a prose-only edit is still an edit
+to a file that runs. The check is the run, not the diff.
+
+### Correction: the notebook's diagrams were rewritten into shell calls
+
+A prose rewrite of the Task 7 cell turned
+
+```
+![Variant A](images/task7_variant_a.jpeg)
+```
+
+into
+
+```
+__omp_shell("[Variant A](images/task7_variant_a.jpeg)")
+```
+
+so the notebook rendered a shell-call placeholder where each architecture diagram
+belongs. The same edit path also dropped the `image_predictions` cell that defines
+`heads`, which the Task 6 cell consumes — the R1 regression, reintroduced.
+
+**Why the check did not fire.** `test_notebook_assets_exist` matched
+`!\[[^\]]*\]\(([^)]+)\)`. Losing the leading `!` removed the reference from the
+scan, so the test found zero references and approved. `refs` was never asserted
+non-empty.
+
+**Fix.** Image markdown restored, the cell spliced back from the last verified
+executed copy, and the test hardened three ways, each mutation-verified:
+
+| Mutation | Result |
+|:---|:---|
+| one reference rewritten as a shell call | FAILS — `image markdown was rewritten into a shell call` |
+| all references removed (empty set) | FAILS — `no image references found` |
+| asset renamed away | FAILS — `notebook references missing asset(s)` |
+
+The general rule this is the third instance of in this session: **a check that can
+be satisfied by finding nothing is not a check.** Assert the positive case (a
+reference exists, a file resolves, a test observes the defect) before asserting
+the absence of the bad one.

@@ -396,6 +396,31 @@ feature table DO about it", and the answer changes what ships.
 
 ---
 
+## D18 · One Parquet object per device per day, and a one-day lake
+
+**Choice.** Land **one compacted Parquet object per device per day** — 3 M PUTs a
+month, $15 — rather than per device-hour ($360) or per reading ($1,440). The lake
+is therefore up to one day behind the last reading of a completed UTC day, and
+anything that must react sooner reads the ingestion buffer: the per-device-window
+checks and the serving table refresh **hourly** from it.
+
+**Rests on.** AWS's S3 rule action writes one object per MQTT message and does not
+batch, so the object count is a design decision with a price attached. An hourly
+object at this cadence holds four readings, so it pays 24× the request cost for
+nothing the serving tier does not already give. Total ≈**$190–450/month**
+including IoT Core connectivity and rules.
+
+**If wrong.** If anything downstream needs **lake files** fresher than a day — not
+just fresh dashboards — switch to hourly objects: **$360/month** of requests,
+total ≈**$533–792/month**. It is a change of partition granularity, not of
+architecture, which is exactly why the checks were kept as portable SQL/Python
+over Parquet.
+
+**Ask:** does any consumer need lake data fresher than a day, or is hourly
+freshness needed only for alerts and dashboards?
+
+---
+
 ## Who owns what
 
 | Conversation | Decisions to settle |
@@ -404,8 +429,9 @@ feature table DO about it", and the answer changes what ships.
 | **Firmware** | D2 (cadence), D3 (timezone vs clock), D4 (°F scope), D6 (stall signature), D9 (behaviour at 00:00), D13 (light spikes) |
 | **Product / Backend** | D7 (substrate historisation), D10 (co-location), D11 (two sensors) |
 | **Analysis team** | D5 (can you use flagged values?), D8 (can you tolerate a gap?) |
+| **Platform / Data** | D14 (model independence), D15 (log vocabulary), D16 (atomic publish), D17 (fusion rule), D18 (lake freshness) |
 
-Four conversations. Every one of them can change code, so it's cheaper to have
+Five conversations. Every one of them can change code, so it's cheaper to have
 them before Task 5 than after.
 
 ---
