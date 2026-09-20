@@ -59,7 +59,29 @@ from fyta.signals import drydown_rate, log_signals
 from fyta.sources import assess_source, image_predictions, triangulate
 
 ROOT = Path(__file__).resolve().parent
-DATA = ROOT.parent / "data"
+
+
+def find_data_dir() -> Path:
+    """Where the four source CSVs are, wherever this copy happens to sit.
+
+    Two layouts are supported, in this order:
+
+        data/ beside this file     a self-contained copy of the folder
+        data/ one level up         the repository layout
+
+    Both candidates are named in the error rather than falling back silently: a
+    wrong guess would surface later as a confusing pandas error instead of a
+    missing file.
+    """
+    for candidate in (ROOT / "data", ROOT.parent / "data"):
+        if (candidate / "fyta_sensor_sample.csv").exists():
+            return candidate
+    raise FileNotFoundError(
+        "no data/ containing fyta_sensor_sample.csv found at:\n"
+        f"  {ROOT / 'data'}\n  {ROOT.parent / 'data'}")
+
+
+DATA = find_data_dir()
 OUT = ROOT / "out"
 
 

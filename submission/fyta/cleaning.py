@@ -39,7 +39,9 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
     Duplicate keys are losslessly deduplicated only when every payload field
     agrees. Any disagreement quarantines every row at that key because no
     ordering rule can identify a true value. The rejection ledger preserves
-    enough information to inspect every removed value later.
+    enough information to inspect every nulled value later -- values are set
+    to NULL in the `_clean` column, never deleted, and whole rows appear in the
+    ledger only when a conflicting duplicate is quarantined.
 
     `timestamp` remains the delivered text, including SENS-07 DD/MM and ISO
     formats. `ts_aligned` is the uniform, clock-corrected datetime used for
@@ -98,6 +100,13 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
                 m = df["device_id"] == device
                 df.loc[m, f"{channel}_clean"] = (df.loc[m, channel] - 32) * 5 / 9
 
+    # Two per-row reason columns, in the same shape: `qc_nulled` says which
+    # values were emptied (and why), `qc_flags` says which were kept and marked.
+    # The raw column beside each `_clean` one still holds the value, so the
+    # published table shows both the number and the reason it is not trusted.
+    nulled = pd.Series("", index=df.index)
+    flags = pd.Series("", index=df.index)
+
     # F3 frozen: the whole run is untrustworthy, not just its first sample
     for _, w in windows.iterrows():
         col = f"{w['channel']}_clean"
@@ -108,10 +117,10 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
             "ts_aligned": df.loc[m, "ts_aligned"],
             "channel": w["channel"], "raw_value": df.loc[m, w["channel"]],
             "reason": f"frozen_channel ({w['samples']} samples at {w['frozen_at']})"}))
+        nulled[m] += f"{w['channel']}:frozen_channel;"
         df.loc[m, col] = np.nan
 
     # F5/F6 two-tier: null the impossible, flag the merely out-of-spec
-    flags = pd.Series("", index=df.index)
     for channel, (lo_imp, hi_imp) in IMPOSSIBLE.items():
         col = f"{channel}_clean"
         impossible = (df[col] < lo_imp) | (df[col] > hi_imp)
@@ -122,6 +131,7 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
                 "ts_aligned": df.loc[impossible, "ts_aligned"],
                 "channel": channel, "raw_value": df.loc[impossible, channel],
                 "reason": f"impossible (outside [{lo_imp}, {hi_imp}])"}))
+            nulled[impossible] += f"{channel}:impossible;"
             df.loc[impossible, col] = np.nan
 
         if channel in SPEC:
@@ -137,6 +147,7 @@ def clean(sensor: pd.DataFrame, windows: pd.DataFrame) -> tuple:
         m = (df["device_id"] == sp["device"]) & (aligned["ts"] == sp["ts"])
         flags[m] += f"{sp['channel']}:dark_hour_single_sample;"
 
+    df["qc_nulled"] = nulled
     df["qc_flags"] = flags
     # Keep source text and the consumer datetime; drop the working time column.
     df = df.drop(columns=["ts"])
@@ -213,6 +224,22 @@ def audit(cleaned: pd.DataFrame, raw: pd.DataFrame, rejections: pd.DataFrame) ->
     checks.append(("every null has a rejection behind it",
                    not orphaned,
                    f"unexplained: {orphaned or 'none'}"))
+
+    # `qc_nulled` is a claim the published table makes about itself, so it is
+    # reconciled against the ledger like every other claim: same keys, same
+    # channels. Without this, the column could name the wrong values and the
+    # reader would have no way to see it.
+    ledger_nulls = rejections[rejections["channel"] != ROW_REJECTION]
+    want = set(zip(ledger_nulls["device_id"], ledger_nulls["timestamp"],
+                   ledger_nulls["channel"]))
+    named = {(d, t, part.split(":")[0])
+             for d, t, tok in zip(cleaned["device_id"], cleaned["timestamp"],
+                                  cleaned["qc_nulled"].fillna(""))
+             for part in tok.split(";") if part}
+    checks.append(("qc_nulled names exactly the ledger's value rejections",
+                   named == want,
+                   f"{len(want)} value(s) in the ledger, {len(named)} named -- "
+                   f"{len(want - named)} missing, {len(named - want)} extra"))
 
     # Re-detect frozen windows from raw instead of trusting the supplied windows.
     # Convert aligned timestamps back because windows use the device clock.

@@ -13,7 +13,9 @@ uv run fyta_pipeline.py          # writes out/ and the full run log
 uv run test_gates.py             # regression checks; each fails if its fix is reverted
 ```
 
-Idempotent: same input, same output. `submission/fyta_analysis.ipynb` imports
+Idempotent: same input, same output. The four source CSVs are found beside the
+code or one level up, so a copy of `submission/` that carries its own `data/`
+runs without the repository around it. `submission/fyta_analysis.ipynb` imports
 the same code and renders the narrative with the figures. It executes headlessly,
 which is how its stored outputs are kept honest:
 

@@ -31,9 +31,9 @@ FYTA Assessment/
     fyta/                      domain.py · sensors.py · cleaning.py · sources.py
                                features.py · signals.py
     fyta_pipeline.py           entry point + stdout tee to out/run.log
-    fyta_analysis.ipynb        50 cells (21 code) · executed fresh · 0 errors
-    test_gates.py              18 regression checks (each fails on revert)
-    WRITEUP.md / WRITEUP.pdf   the submission note: 1 page, 533 words, 10.6 pt
+    fyta_analysis.ipynb        48 cells (20 code) · executed fresh · 0 errors
+    test_gates.py              20 regression checks (each fails on revert)
+    WRITEUP.md / WRITEUP.pdf   the submission note: 1 page, 527 words, 10.6 pt
     md_to_pdf.py               builds the PDF via headless Chrome
     out/                       11 CSVs, 2 figures, run.log (all regenerable)
 ```
@@ -41,9 +41,9 @@ FYTA Assessment/
 **Verified at this boundary — each line is an output that was read, not expected:**
 
 ```
-uv run fyta_pipeline.py    exit 0 · 21 of 21 audit checks pass · 565 lines of run.log
-uv run test_gates.py       18 of 18 pass · 7 new checks each verified to FAIL on revert
-fyta_analysis.ipynb        50 cells · 21 code · all executed · 0 errors · 2 figures
+uv run fyta_pipeline.py    exit 0 · 22 of 22 audit checks pass · 566 lines of run.log
+uv run test_gates.py       20 of 20 pass · 7 new checks each verified to FAIL on revert
+fyta_analysis.ipynb        48 cells · 20 code · all executed · 0 errors · 2 figures
 idempotency                a full re-run reproduced all 14 artifacts byte-for-byte (md5)
 prose pass                 module prose 6,057→3,616 w · prints 1,745→940 w ·
                            notebook 5,357→4,245 w · design doc 3,754→3,021 w

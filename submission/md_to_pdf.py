@@ -17,8 +17,8 @@ CSS = """
 @page { size: A4; margin: 11mm 12mm; }
 * { box-sizing: border-box; }
 body {
-  font-family: "Latin Modern Roman", "LM Roman 10", "Computer Modern", serif;
-  font-size: 10.6pt; line-height: 1.34; color: #16181d; margin: 0;
+  font-family: "Times New Roman", "Liberation Serif", Tinos, "Nimbus Roman", Georgia, serif;
+  font-size: 11pt; line-height: 1.30; color: #16181d; margin: 0;
   -webkit-font-smoothing: antialiased;
 }
 h1 { font-size: 18pt; margin: 0 0 1mm; letter-spacing: -0.2pt; }
@@ -33,8 +33,8 @@ th, td { border: 1px solid #d9dde3; padding: 1.3mm 2mm; text-align: left;
          vertical-align: top; }
 th { background: #f2f4f7; font-weight: 600; }
 td:first-child { white-space: nowrap; }
-code { font-family: "Latin Modern Mono Light", "LM Mono 10", monospace;
-       font-size: 9.0pt; background: #f4f5f7; padding: 0 0.7mm;
+code { font-family: Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+       font-size: 9.8pt; background: #f4f5f7; padding: 0 0.7mm;
        border-radius: 2px; }
 ul { margin: 0.8mm 0 2.4mm; padding-left: 4.5mm; }
 li { margin-bottom: 0.9mm; }

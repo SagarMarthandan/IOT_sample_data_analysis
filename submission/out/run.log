@@ -381,6 +381,7 @@ impossible          71
                                           raw columns untouched    True                                  all 5 raw channels equal the source on 15,935 keys
                     every rejection is null in its clean column    True                                             0 of 1415 rejections still hold a value
                            every null has a rejection behind it    True                                                                   unexplained: none
+          qc_nulled names exactly the ledger's value rejections    True                       1415 value(s) in the ledger, 1415 named -- 0 missing, 0 extra
        every frozen window in the source is nulled and recorded    True                                   1 window(s) re-detected from raw; unhandled: none
        soil_moisture_vwc: outside_spec flags match the detector    True                                 382 detected -- 0 unflagged, 0 flagged but in range
                 ec_us_cm: outside_spec flags match the detector    True                                 354 detected -- 0 unflagged, 0 flagged but in range

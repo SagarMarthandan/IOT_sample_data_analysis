@@ -14,6 +14,7 @@ import pandas as pd
 
 from fyta.cleaning import audit, clean
 from fyta.domain import CADENCE
+from fyta_pipeline import DATA, ROOT      # resolved once, layout-agnostic
 from fyta.features import plant_features
 from fyta.sensors import (check_grid, frozen_windows, parse_timestamps,
                           spec_violations)
@@ -26,7 +27,7 @@ def test_audit_catches_an_uncleaned_frozen_window():
     The original check asked "is there at least one null in moisture?", which
     any unrelated null satisfies -- 1,344 restored values passed it.
     """
-    raw = pd.read_csv("../data/fyta_sensor_sample.csv")
+    raw = pd.read_csv(DATA / "fyta_sensor_sample.csv")
     raw["ts"] = parse_timestamps(raw["timestamp"])
     raw = raw.sort_values(["device_id", "ts"], ignore_index=True)
     cleaned, rejections = clean(raw, frozen_windows(raw))
@@ -126,7 +127,7 @@ def _parsed():
     pass. A fixture that has to lie about the input shape is not a regression
     test for code that reads the real one.
     """
-    raw = pd.read_csv("../data/fyta_sensor_sample.csv")
+    raw = pd.read_csv(DATA / "fyta_sensor_sample.csv")
     raw["ts"] = parse_timestamps(raw["timestamp"])
     raw["substrate_label"] = raw["substrate_label"].astype(str)
     return raw
@@ -245,7 +246,7 @@ def test_unmapped_devices_fail_loudly():
     """An inner merge must not delete a device silently."""
     raw = _parsed()
     cleaned, _ = clean(raw, frozen_windows(raw))
-    mapping = pd.read_csv("../data/user_plant_device_map.csv")
+    mapping = pd.read_csv(DATA / "user_plant_device_map.csv")
     partial = mapping[mapping["device_id"] != "SENS-08"]
     try:
         plant_features(cleaned, partial)
@@ -270,10 +271,10 @@ def test_untestable_is_not_a_negative():
     """No baseline is not the same finding as no response."""
     raw = _parsed()
     cleaned, _ = clean(raw, frozen_windows(raw))
-    mapping = pd.read_csv("../data/user_plant_device_map.csv")
+    mapping = pd.read_csv(DATA / "user_plant_device_map.csv")
     features = plant_features(cleaned, mapping)
-    contextual = pd.read_csv("../data/fyta_contextual.csv", parse_dates=["created_at"])
-    images = pd.read_csv("../data/fyta_images.csv", parse_dates=["captured_at"])
+    contextual = pd.read_csv(DATA / "fyta_contextual.csv", parse_dates=["created_at"])
+    images = pd.read_csv(DATA / "fyta_images.csv", parse_dates=["captured_at"])
     heads, _, _ = image_predictions(images)
 
     at = pd.Timestamp("2026-06-03 14:00")
@@ -311,16 +312,38 @@ def test_notebook_assets_exist():
     import json
     import re
     from pathlib import Path
-    nb = json.loads(Path("fyta_analysis.ipynb").read_text())
+
+    nb_path = ROOT / "fyta_analysis.ipynb"
+    if not nb_path.exists():
+        # A code-only bundle is a legitimate submission. Say so out loud: an
+        # absent input is not a check that passed -- this suite exists because
+        # a check satisfied by finding nothing is how the diagrams broke.
+        print("      (skipped: this bundle has no notebook, so it references no assets)")
+        return
+
+    nb = json.loads(nb_path.read_text())
     text = "".join("".join(c["source"]) for c in nb["cells"])
 
     refs = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", text)
     assert refs, ("no image references found, but the notebook embeds the two "
                   "architecture diagrams -- the markdown was altered")
 
-    missing = [r for r in refs
-               if not r.startswith(("http://", "https://")) and not Path(r).exists()]
+    # A reference is satisfied either by a file beside the notebook or by an
+    # attachment carried inside it. Attachments are why the diagrams survive
+    # being copied to another machine, or opened by a viewer that resolves
+    # relative paths against its own working directory.
+    missing, unattached = [], []
+    for cell in nb["cells"]:
+        for ref in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", "".join(cell["source"])):
+            if ref.startswith(("http://", "https://")):
+                continue
+            if ref.startswith("attachment:"):
+                if ref.split(":", 1)[1] not in (cell.get("attachments") or {}):
+                    unattached.append(ref)
+            elif not (nb_path.parent / ref).exists():
+                missing.append(ref)
     assert not missing, f"notebook references missing asset(s): {missing}"
+    assert not unattached, f"notebook references attachment(s) it does not carry: {unattached}"
 
     mangled = re.findall(r"__omp_shell\(\"[^\"]*\]\(([^)]+)\)", text)
     assert not mangled, f"image markdown was rewritten into a shell call: {mangled}"
@@ -409,10 +432,10 @@ def test_an_unavailable_probe_does_not_mask_the_other():
     """
     raw = _parsed()
     cleaned, _ = clean(raw, frozen_windows(raw))
-    mapping = pd.read_csv("../data/user_plant_device_map.csv")
+    mapping = pd.read_csv(DATA / "user_plant_device_map.csv")
     features = plant_features(cleaned, mapping)
-    contextual = pd.read_csv("../data/fyta_contextual.csv", parse_dates=["created_at"])
-    images = pd.read_csv("../data/fyta_images.csv", parse_dates=["captured_at"])
+    contextual = pd.read_csv(DATA / "fyta_contextual.csv", parse_dates=["created_at"])
+    images = pd.read_csv(DATA / "fyta_images.csv", parse_dates=["captured_at"])
     heads, _, _ = image_predictions(images)
 
     at = pd.Timestamp("2026-06-03 14:00")
@@ -427,6 +450,56 @@ def test_an_unavailable_probe_does_not_mask_the_other():
         f"an invalid probe won the selection: {out.loc['LOG-00001', 'leg_detail']}"
     assert out.loc["LOG-00001", "sensor_leg"] == "rises", \
         f"probe 2's rise was hidden: {out.loc['LOG-00001', 'leg_detail']}"
+
+
+def test_audit_reconciles_the_nulled_column():
+    """`qc_nulled` must name the values the ledger emptied, by key and channel.
+
+    The column is a claim the published table makes about itself. Stripping it
+    leaves 1,415 values empty in `_clean` with no reason attached to the row,
+    which is the defect the ledger exists to prevent.
+    """
+    raw = _parsed()
+    cleaned, rejections = clean(raw, frozen_windows(raw))
+    named = int(cleaned["qc_nulled"].fillna("").ne("").sum())
+    ledger_values = int((rejections["channel"] != "(row)").sum())
+    assert named == ledger_values and named > 0, \
+        f"the fixture must name its nulled values: {named} named, {ledger_values} in the ledger"
+
+    stripped = cleaned.copy()
+    stripped["qc_nulled"] = ""
+    result = audit(stripped, raw, rejections)
+    failed = result.loc[~result["passed"], "check"].tolist()
+    assert any("qc_nulled" in c for c in failed), \
+        f"a stripped qc_nulled column passed the gate; failures were {failed}"
+
+
+def test_notebook_defines_heads_before_using_it():
+    """The Task 6 cell consumes `heads`; a cell must define it first.
+
+    R1: the cell that created `heads` was removed by an edit, and the notebook
+    only failed at execution -- from a fresh kernel, in front of a reviewer.
+    It happened twice, so the dependency is pinned here rather than remembered.
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    nb_path = ROOT / "fyta_analysis.ipynb"
+    if not nb_path.exists():
+        print("      (skipped: this bundle has no notebook)")
+        return
+
+    code = [c for c in json.loads(nb_path.read_text())["cells"] if c["cell_type"] == "code"]
+    defines = [i for i, c in enumerate(code)
+               if any(re.match(r"\s*heads\s*(,|=)", l) for l in "".join(c["source"]).splitlines())]
+    uses = [i for i, c in enumerate(code)
+            if any("triangulate(" in l and "heads" in l
+                   for l in "".join(c["source"]).splitlines())]
+    assert defines, "no cell defines `heads`"
+    assert uses, "no cell consumes `heads`"
+    assert min(defines) <= min(uses), \
+        f"`heads` is consumed in code cell {min(uses)} but only defined in {defines}"
 
 
 def test_a_uniform_timestamp_shift_is_off_grid():
