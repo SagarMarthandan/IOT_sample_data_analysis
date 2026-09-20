@@ -19,16 +19,13 @@ FYTA Assessment/
   README.md                    how to run it, layout, regenerable out/ note
   data/                        the four source CSVs — NEVER WRITTEN TO (md5 unchanged)
   docs/
-    assessment.md              the brief + correspondence (canonical)
-    DATA.md                    what the data is, incl. the impossible bounds
-    second_opinion.md          first two external audits
-    second_opinion_astra.md    third review + the reassessment (R1–R6 + editorial)
-    observations.md            findings + method + mistakes; the last two sections
-                               record this session's two passes
+    assessment.md              the brief + thread + what the data actually IS
+                               (Parts 1–3; DATA.md merged in 2026-09-20)
+    observations.md            findings, method, mistakes, open items, and the
+                               three external reviews verbatim (Parts 1–7)
     decision_register.md       D1–D18, each with an owner
-    HANDOFF.md                 this file
     PIPELINE_DESIGN.md         Task 7: one batching policy, latency, cost arithmetic
-    diagram_*.md               prompts used to generate the two diagrams
+    HANDOFF.md                 this file
   submission/
     images/                    hand-made architecture diagrams (static, NOT in out/)
     fyta/                      domain.py · sensors.py · cleaning.py · sources.py

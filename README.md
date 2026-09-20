@@ -34,7 +34,8 @@ cd submission && uv run --with markdown python md_to_pdf.py
 
 ```
 data/                     the four source tables — never written to
-docs/                     findings, decisions, open questions, pipeline design
+docs/                     assessment + what the data is · observations with the
+                          three external reviews · decisions · design · handoff
 submission/
   fyta/                   the logic, split by change reason
     domain.py               assertions; no I/O, no pandas
